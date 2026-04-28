@@ -1,0 +1,4 @@
+region: "{{ var.region }}"
+project_code: comet
+
+stack_tags: {{ var.stack_tags | tojson }}

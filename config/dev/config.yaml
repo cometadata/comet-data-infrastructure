@@ -1,0 +1,16 @@
+template_bucket_name: "{{ var.template_bucket }}"
+
+vars:
+  env: dev
+
+sceptre_user_data:
+  vpc_id: !stack_output_external {{ var.vpc_stack_output }}
+  public_subnets:
+    - !stack_output_external {{ var.public_subnet_a_stack_output }}
+    - !stack_output_external {{ var.public_subnet_b_stack_output }}
+    - !stack_output_external {{ var.public_subnet_c_stack_output }}
+  public_subnet: !stack_output_external {{ var.public_subnet_a_stack_output }}
+
+  ecr:
+    name: comet-dev
+    tag: latest

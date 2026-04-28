@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: 'An EC2 instance for development and testing'
+
+Parameters:
+  ImageId:
+    Type: 'AWS::EC2::Image::Id'
+
+  SubnetId:
+    Type: 'AWS::EC2::Subnet::Id'
+
+  S3BucketID:
+    Type: 'String'
+
+  CometSecurityGroupId:
+    Type: 'String'
+
+  InstanceType:
+    Type: 'String'
+    Default: 'c5ad.large' # cheapest AMD instance with NVMe storage
+
+Resources:
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      Tags:
+        # Sets EC2 instance name
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-dev'
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref ImageId
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref CometSecurityGroupId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      PropagateTagsToVolumeOnCreation: true
+      BlockDeviceMappings:
+        - DeviceName: '/dev/xvda' # Amazon Linux root volume
+          Ebs:
+            VolumeType: 'gp3'
+            DeleteOnTermination: true
+            VolumeSize: 30 # GB
+      UserData:
+        Fn::Base64: !Sub |
+          MIME-Version: 1.0
+          Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+          --==BOUNDARY==
+          Content-Type: text/x-shellscript; charset="us-ascii"
+
+          #!/bin/bash
+          set -uxo pipefail
+
+          # Save Cloud Watch Agent config
+          cat > /tmp/amazon-cloudwatch-agent.json << 'CWA_SCRIPT'
+          {
+            "agent": {
+              "run_as_user": "root"
+            },
+            "metrics": {
+              "metrics_collected": {
+                "mem": {
+                  "measurement": [
+                    "mem_used_percent",
+                    "mem_total",
+                    "mem_used"
+                  ],
+                  "metrics_collection_interval": 60
+                },
+                "disk": {
+                  "resources": [
+                    "/",
+                    "/data"
+                  ],
+                  "measurement": [
+                    "used_percent",
+                    "used",
+                    "total"
+                  ],
+                  "drop_device_metrics": true,
+                  "metrics_collection_interval": 60
+                }
+              },
+              "append_dimensions": {
+                "InstanceId": "${!aws:InstanceId}"
+              }
+            }
+          }
+          CWA_SCRIPT
+
+          cat > /tmp/setup-instance.sh << 'SCRIPT'
+          #!/bin/bash
+          set -uxo pipefail
+
+          # Refresh local list of available packages
+          dnf update -y
+
+          # Install any required system dependencies
+          dnf install amazon-cloudwatch-agent mdadm docker amazon-ecr-credential-helper htop -y
+
+          # Install Docker
+          systemctl enable --now docker
+          usermod -a -G docker ec2-user
+
+          # Give Docker access to ECR
+          mkdir -p /home/ec2-user/.docker
+          chown ec2-user:ec2-user /home/ec2-user/.docker
+          echo '{"credsStore":"ecr-login"}' > /home/ec2-user/.docker/config.json
+          chown ec2-user:ec2-user /home/ec2-user/.docker/config.json
+
+          # Mount disks to /data dir
+          if lsblk | grep -q nvme1n1 && lsblk | grep -q nvme2n1; then
+            # Mount two disks to /data dir
+
+            # Create RAID 0 (if not already exists)
+            if [ ! -e /dev/md0 ]; then
+              mdadm --create --verbose /dev/md0 --level=0 --raid-devices=2 /dev/nvme1n1 /dev/nvme2n1 --assume-clean --run
+            fi
+
+            # Persist RAID config
+            mkdir -p /etc/mdadm
+            mdadm --detail --scan >> /etc/mdadm/mdadm.conf
+
+            # Format if not already formatted
+            if ! blkid /dev/md0; then
+              mkfs.ext4 -F /dev/md0
+            fi
+
+            # Mount to /data
+            mkdir -p /data
+            echo "/dev/md0 /data ext4 defaults,nofail 0 2" >> /etc/fstab
+            mount /data
+            chown ec2-user:ec2-user /data
+          elif lsblk | grep -q nvme1n1; then
+            # Mount single disk to /data dir
+            mkfs.ext4 /dev/nvme1n1
+            mkdir -p /data
+            echo "/dev/nvme1n1 /data ext4 defaults,nofail 0 2" >> /etc/fstab
+            mount /data
+            chown ec2-user:ec2-user /data
+          fi
+
+          # Make temp dir
+          mkdir /data/tmp
+
+          # Start Cloud Watch Agent with config
+          cp /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+          amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
+          SCRIPT
+
+          # Run the script only once on the instance
+          cloud-init-per instance setup-instance /bin/bash /tmp/setup-instance.sh
+
+          --==BOUNDARY==--
+
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-instance-profile'
+      Roles: [ !Ref EC2InstanceRole ]
+
+  EC2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-instance-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub '${AWS::StackName}-describe-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInstances
+                  - ec2:DescribeRegions
+                  - ec2:DescribeRouteTables
+                Resource: '*'
+        - PolicyName: !Sub '${AWS::StackName}-s3-policy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - 's3:PutObject'
+                - 's3:GetObject'
+                - 's3:DeleteObject'
+                - 's3:ListBucket'
+              Resource:
+                - !Sub 'arn:aws:s3:::${S3BucketID}'
+                - !Sub 'arn:aws:s3:::${S3BucketID}/*'
+                - !Sub 'arn:aws:s3:::arxiv'
+                - !Sub 'arn:aws:s3:::arxiv/*'
+
+        - PolicyName: !Sub '${AWS::StackName}-ecr-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+Outputs:
+  EC2InstanceRoleArn:
+    Value: !GetAtt EC2InstanceRole.Arn

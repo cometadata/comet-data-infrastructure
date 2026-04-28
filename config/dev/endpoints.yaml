@@ -1,0 +1,9 @@
+template:
+  path: endpoints.yaml
+  type: file
+
+parameters:
+  VpcId: !stack_attr sceptre_user_data.vpc_id
+  RouteTableId: !stack_output_external {{ var.route_table_stack_output }}
+  SubnetIds: !stack_attr sceptre_user_data.public_subnets
+  SecurityGroupId: !stack_output dev/security-groups.yaml::CometSecurityGroupId

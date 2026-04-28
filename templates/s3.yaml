@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'S3 storage for COMET'
+
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: 'Retain'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-data'
+      AccessControl: 'Private'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'ICMU'
+            Status: 'Enabled'
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 5
+
+Outputs:
+  S3BucketID:
+    Value: !Ref S3Bucket
+
+  S3BucketURI:
+    Value: !Sub "s3://${S3Bucket}"
+
+  S3BucketARN:
+    Value: !GetAtt S3Bucket.Arn

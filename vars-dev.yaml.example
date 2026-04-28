@@ -1,0 +1,17 @@
+# Copy to vars-dev.yaml and fill in. vars-dev.yaml is gitignored.
+
+env: dev
+region: us-east-1
+template_bucket: your-comet-dev-cloudformation
+
+stack_tags:
+  CodeRepo: https://github.com/cometadata/comet-data-infrastructure
+  Contact: ''
+  Environment: dev
+
+# Format: "<stack-name>::<output-key> <aws-profile>"
+vpc_stack_output: ''
+route_table_stack_output: ''
+public_subnet_a_stack_output: ''
+public_subnet_b_stack_output: ''
+public_subnet_c_stack_output: ''

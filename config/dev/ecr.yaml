@@ -1,0 +1,6 @@
+template:
+  path: ecr.yaml
+  type: file
+
+parameters:
+  RepositoryName: comet-dev
