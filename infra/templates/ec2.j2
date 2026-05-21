@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: 'An EC2 instance for development and testing'
+
+Parameters:
+  ImageId:
+    Type: 'AWS::EC2::Image::Id'
+
+  SubnetId:
+    Type: 'AWS::EC2::Subnet::Id'
+
+  S3BucketID:
+    Type: 'String'
+
+  SecurityGroupId:
+    Type: 'String'
+
+  InstanceType:
+    Type: 'String'
+    Default: 'c5ad.large' # cheapest AMD instance with NVMe storage
+
+Resources:
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-dev'
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref ImageId
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      PropagateTagsToVolumeOnCreation: true
+      BlockDeviceMappings:
+        - DeviceName: '/dev/xvda'
+          Ebs:
+            VolumeType: 'gp3'
+            DeleteOnTermination: true
+            VolumeSize: 30
+      UserData:
+        Fn::Base64: !Sub |
+          MIME-Version: 1.0
+          Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+          --==BOUNDARY==
+          Content-Type: text/x-shellscript; charset="us-ascii"
+
+          #!/bin/bash
+          set -uxo pipefail
+
+          cat > /tmp/amazon-cloudwatch-agent.json << 'CWA_SCRIPT'
+{% filter indent(10, true) %}{% include 'includes/cloudwatch-agent.json' %}{% endfilter %}
+          CWA_SCRIPT
+
+          cat > /tmp/setup-instance.sh << 'SCRIPT'
+          #!/bin/bash
+          set -uxo pipefail
+
+          dnf update -y
+
+          dnf install amazon-cloudwatch-agent mdadm docker amazon-ecr-credential-helper htop -y
+
+          systemctl enable --now docker
+          usermod -a -G docker ec2-user
+
+          # Give Docker access to ECR
+          mkdir -p /home/ec2-user/.docker
+          chown ec2-user:ec2-user /home/ec2-user/.docker
+          echo '{"credsStore":"ecr-login"}' > /home/ec2-user/.docker/config.json
+          chown ec2-user:ec2-user /home/ec2-user/.docker/config.json
+
+{% filter indent(10, true) %}{% include 'includes/setup-data-disk.sh' %}{% endfilter %}
+          chown ec2-user:ec2-user /data
+
+          cp /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+          amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
+          SCRIPT
+
+          # Run the script only once on the instance
+          cloud-init-per instance setup-instance /bin/bash /tmp/setup-instance.sh
+
+          --==BOUNDARY==--
+
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-instance-profile'
+      Roles: [ !Ref EC2InstanceRole ]
+
+  EC2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-instance-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub '${AWS::StackName}-describe-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInstances
+                  - ec2:DescribeRegions
+                  - ec2:DescribeRouteTables
+                Resource: '*'
+        - PolicyName: !Sub '${AWS::StackName}-s3-policy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - 's3:PutObject'
+                - 's3:GetObject'
+                - 's3:DeleteObject'
+                - 's3:ListBucket'
+              Resource:
+                - !Sub 'arn:aws:s3:::${S3BucketID}'
+                - !Sub 'arn:aws:s3:::${S3BucketID}/*'
+                - !Sub 'arn:aws:s3:::arxiv'
+                - !Sub 'arn:aws:s3:::arxiv/*'
+
+        - PolicyName: !Sub '${AWS::StackName}-ecr-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                Resource: '*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+Outputs:
+  EC2InstanceRoleArn:
+    Value: !GetAtt EC2InstanceRole.Arn

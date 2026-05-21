@@ -1,0 +1,95 @@
+# -----------------------------------------------------
+# Build COMET DataCite enrichment CLIs
+# -----------------------------------------------------
+
+FROM amazonlinux:2023 AS builder
+
+ARG RUST_TARGET_CPU="x86-64-v3"
+ENV RUST_TARGET_CPU=${RUST_TARGET_CPU}
+
+# Compiler toolchain and OpenSSL headers
+RUN dnf -y install git openssl-devel && \
+    dnf group install -y "Development Tools" && \
+    dnf clean all
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# match-datacite-affiliations-to-ror-ids -> comet-enrich-datacite-affiliations
+ARG AFFILIATIONS_GIT_REPO=https://github.com/cometadata/match-datacite-affiliations-to-ror-ids.git
+ARG AFFILIATIONS_GIT_REF=feature/marple
+ARG AFFILIATIONS_CACHEBUST=6c6d174
+RUN git clone --branch "${AFFILIATIONS_GIT_REF}" --depth 1 "${AFFILIATIONS_GIT_REPO}" /src/affiliations
+RUN RUSTFLAGS="-C target-cpu=${RUST_TARGET_CPU}" cargo build --release --manifest-path /src/affiliations/Cargo.toml
+
+# reclassify-resource-type-general -> comet-enrich-datacite-resource-type-general
+ARG RESOURCE_TYPE_GENERAL_GIT_REPO=https://github.com/cometadata/reclassify-resource-type-general.git
+ARG RESOURCE_TYPE_GENERAL_GIT_REF=main
+ARG RESOURCE_TYPE_GENERAL_CACHEBUST=b67af8b
+RUN git clone --branch "${RESOURCE_TYPE_GENERAL_GIT_REF}" --depth 1 "${RESOURCE_TYPE_GENERAL_GIT_REPO}" /src/resource-type-general
+RUN RUSTFLAGS="-C target-cpu=${RUST_TARGET_CPU}" cargo build --release --manifest-path /src/resource-type-general/Cargo.toml
+
+# match-datacite-funders-to-ror-ids -> comet-enrich-datacite-funders
+ARG FUNDERS_GIT_REPO=https://github.com/cometadata/match-datacite-funders-to-ror-ids.git
+ARG FUNDERS_GIT_REF=main
+ARG FUNDERS_CACHEBUST=0df434e
+RUN git clone --branch "${FUNDERS_GIT_REF}" --depth 1 "${FUNDERS_GIT_REPO}" /src/funders
+RUN RUSTFLAGS="-C target-cpu=${RUST_TARGET_CPU}" cargo build --release --manifest-path /src/funders/Cargo.toml
+
+# -----------------------------------------------------
+# Create final image
+# -----------------------------------------------------
+
+FROM amazonlinux:2023
+ARG S5CMD_VERSION="2.3.0"
+ARG PYTHON_VERSION="3.12"
+ENV S5CMD_VERSION=${S5CMD_VERSION}
+ENV PYTHON_VERSION=${PYTHON_VERSION}
+
+# Pull uv into image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN dnf install -y \
+    aws-cli \
+    git \
+    tar \
+    gzip \
+    wget \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-pip
+
+ENV TMPDIR=/data/tmp
+RUN mkdir -p ${TMPDIR}
+
+WORKDIR /app
+
+# Install s5cmd
+RUN wget https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz && \
+    tar -xzf s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz s5cmd && \
+    chmod +x s5cmd && \
+    mv s5cmd /usr/local/bin/ && \
+    rm s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz
+
+# Rust enrichment CLIs
+COPY --from=builder /src/affiliations/target/release/datacite-ror                        /usr/local/bin/comet-enrich-datacite-affiliations
+COPY --from=builder /src/resource-type-general/target/release/resource-type-reclassifier /usr/local/bin/comet-enrich-datacite-resource-type-general
+COPY --from=builder /src/funders/target/release/datacite-ror                             /usr/local/bin/comet-enrich-datacite-funders
+
+# Enrichment configs live on S3 and are downloaded at job runtime.
+
+# Readiness-wait entrypoint
+COPY docker/batch-entrypoint.sh /usr/local/bin/comet-batch-entrypoint
+RUN chmod +x /usr/local/bin/comet-batch-entrypoint
+
+# Sync Python dependencies
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --no-dev --python ${PYTHON_VERSION}
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Install comet package
+COPY src/ src/
+RUN uv sync --frozen --no-dev --python ${PYTHON_VERSION}
+
+ENTRYPOINT ["comet-batch-entrypoint"]

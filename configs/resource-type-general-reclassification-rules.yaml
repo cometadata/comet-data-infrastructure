@@ -1,0 +1,137 @@
+# Mirrored from cometadata/reclassify-resource-type-general (main, configs/reclassification_rules.yaml).
+# Consumed by the resource-type-general reclassifier via --rules.
+threshold: 0.85
+
+reference_values:
+  - Audiovisual
+  - Award
+  - Book
+  - BookChapter
+  - Collection
+  - ComputationalNotebook
+  - ConferencePaper
+  - ConferenceProceeding
+  - DataPaper
+  - Dataset
+  - Dissertation
+  - Event
+  - Image
+  - InteractiveResource
+  - Instrument
+  - Journal
+  - JournalArticle
+  - Model
+  - OutputManagementPlan
+  - PeerReview
+  - PhysicalObject
+  - Poster
+  - Preprint
+  - Presentation
+  - Project
+  - Report
+  - Service
+  - Software
+  - Sound
+  - Standard
+  - StudyRegistration
+  - Text
+  - Workflow
+  - Other
+
+typo_corrections:
+  otput: output
+  outpt: output
+  ouput: output
+  managment: management
+  mangement: management
+  managemnt: management
+  artical: article
+  articel: article
+  jurnal: journal
+  journel: journal
+  confrence: conference
+  conferance: conference
+  papper: paper
+  paer: paper
+  disertation: dissertation
+  dissertaion: dissertation
+  colection: collection
+  colletion: collection
+  prepint: preprint
+  pre-print: preprint
+  postr: poster
+  postre: poster
+  poter: poster
+  presentaion: presentation
+  presntation: presentation
+  presentaton: presentation
+  presantation: presentation
+  preentation: presentation
+  standart: standard
+  standar: standard
+  servise: service
+  servce: service
+  datset: dataset
+  data-set: dataset
+  sofware: software
+  sotfware: software
+  modle: model
+  modell: model
+  reprot: report
+  repotr: report
+  reveiw: review
+  reivew: review
+  phisical: physical
+  physcial: physical
+  objet: object
+  objct: object
+  interative: interactive
+  intractive: interactive
+  resorce: resource
+  resourse: resource
+  registraton: registration
+  registeration: registration
+  audivisual: audiovisual
+  audiovisal: audiovisual
+  computaional: computational
+  compuational: computational
+  notbook: notebook
+  notebbok: notebook
+  instrumnt: instrument
+  intrument: instrument
+  awrad: award
+  aword: award
+  bok: book
+  boook: book
+  chaper: chapter
+  chater: chapter
+  imge: image
+  inmage: image
+  evnt: event
+  evetn: event
+  projet: project
+  proejct: project
+  sond: sound
+  soudn: sound
+  workfow: workflow
+  work-flow: workflow
+  txt: text
+  texte: text
+  otehr: other
+  ohter: other
+  stdy: study
+  stuyd: study
+  per: peer
+  pear: peer
+
+redundancy_exclusions:
+  - normalized: [text, txt]
+    matches: [Text, Other]
+  - normalized: [other, otehr, ohter]
+    matches: [Text, Other]
+
+scope:
+  target_resource_type_general:
+    - Text
+    - Other
+    - null

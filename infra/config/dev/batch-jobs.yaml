@@ -1,0 +1,20 @@
+template:
+  path: batch-jobs.j2
+  type: file
+
+dependencies:
+  - dev/s3.yaml
+  - dev/ecr.yaml
+
+parameters:
+  Env: "{{ var.env }}"
+  BatchRepositoryName: !stack_output dev/ecr.yaml::BatchRepositoryName
+  MarpleRepositoryName: !stack_output dev/ecr.yaml::MarpleRepositoryName
+  EcrImageTag: !stack_attr sceptre_user_data.ecr.tag
+  S3BucketID: !stack_output dev/s3.yaml::S3BucketID
+  OpenSearchImage: public.ecr.aws/opensearchproject/opensearch:2.17.1
+  DataCiteCredentialsSecretArn: "{{ var.datacite_credentials_secret_arn }}"
+
+capabilities:
+  - CAPABILITY_IAM
+  - CAPABILITY_NAMED_IAM

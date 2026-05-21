@@ -1,0 +1,16 @@
+# Mirrored from cometadata/reclassify-resource-type-general (main, configs/enrichment_metadata.yaml).
+# Consumed by the resource-type-general reclassifier via --enrichment.
+enrichment:
+  sources:
+    - name: "COMET"
+      nameType: "Organizational"
+      contributorType: "Producer"
+  resources:
+    - relatedIdentifier: "10.82461/bpzr-jd55"
+      relatedIdentifierType: "DOI"
+      relationType: "IsDocumentedBy"
+      resourceTypeGeneral: "Project"
+    - relatedIdentifier: "https://huggingface.co/datasets/cometadata/datacite-procedural-resource-type-general-reclassifications-datacite-enrichment-format"
+      relatedIdentifierType: "URL"
+      relationType: "IsDerivedFrom"
+      resourceTypeGeneral: "Dataset"

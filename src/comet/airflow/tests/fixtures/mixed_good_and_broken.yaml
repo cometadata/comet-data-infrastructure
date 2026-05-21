@@ -1,0 +1,42 @@
+# Five entries: two good, three broken (one per isolation failure mode that
+# the loader is responsible for catching at runtime — bad import, params
+# validation, factory raise — plus a duplicate dag_id). The two good entries
+# bracket the broken ones to prove a failure doesn't stop iteration.
+
+dags:
+  - dag_id: good_one
+    factory: comet.airflow.tests.fixtures.factories.fake_factory
+    params:
+      start_date: 2026-01-01
+      foo: ok
+
+  - dag_id: bad_import
+    factory: comet.airflow.tests.fixtures.factories.does_not_exist
+    params:
+      start_date: 2026-01-01
+      foo: x
+
+  - dag_id: bad_params
+    factory: comet.airflow.tests.fixtures.factories.fake_factory
+    params:
+      start_date: 2026-01-01
+      foo: x
+      bogus_field: rejected_by_extra_forbid
+
+  - dag_id: bad_build
+    factory: comet.airflow.tests.fixtures.factories.build_error_factory
+    params:
+      start_date: 2026-01-01
+      foo: x
+
+  - dag_id: good_one
+    factory: comet.airflow.tests.fixtures.factories.fake_factory
+    params:
+      start_date: 2026-01-01
+      foo: duplicate_id
+
+  - dag_id: good_two
+    factory: comet.airflow.tests.fixtures.factories.fake_factory
+    params:
+      start_date: 2026-01-01
+      foo: also-ok

@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Security groups used throughout the project'
+
+Parameters:
+  VpcId:
+    Type: 'String'
+    Description: 'The VPC ID for these security groups.'
+
+Resources:
+  # Three tiers: services, jobs (zero ingress), and endpoints. Cross-SG rules are
+  # standalone to avoid circular references.
+  ServicesSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-services-sg'
+      GroupDescription: 'Airflow services task and ECS host'
+      VpcId: !Ref VpcId
+
+  ServicesIngressApiFromJobs:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: Task Execution API from workers (api-server.comet.local)
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref JobsSecurityGroup
+      GroupId: !Ref ServicesSecurityGroup
+
+  ServicesIngressApiSelf:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: SSM port-forward from the ECS host to the api-server task ENI
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref ServicesSecurityGroup
+      GroupId: !Ref ServicesSecurityGroup
+
+  ServicesEgress:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: Allow all outbound traffic
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      CidrIp: 0.0.0.0/0
+      GroupId: !Ref ServicesSecurityGroup
+
+  JobsSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-jobs-sg'
+      GroupDescription: 'Fargate workers, Batch instances, dev EC2 - no ingress'
+      VpcId: !Ref VpcId
+
+  JobsEgress:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: Allow all outbound traffic
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      CidrIp: 0.0.0.0/0
+      GroupId: !Ref JobsSecurityGroup
+
+  EndpointsSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-endpoints-sg'
+      GroupDescription: 'VPC interface endpoint ENIs'
+      VpcId: !Ref VpcId
+
+  EndpointsIngressFromServices:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: HTTPS from services
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref ServicesSecurityGroup
+      GroupId: !Ref EndpointsSecurityGroup
+
+  EndpointsIngressFromJobs:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: HTTPS from workers and Batch
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref JobsSecurityGroup
+      GroupId: !Ref EndpointsSecurityGroup
+
+  RdsSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-rds-sg'
+      GroupDescription: !Sub 'RDS access for ${AWS::StackName}'
+      VpcId: !Ref VpcId
+
+  RdsIngressFromServices:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: PostgreSQL from Airflow services
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ServicesSecurityGroup
+      GroupId: !Ref RdsSecurityGroup
+
+Outputs:
+  ServicesSecurityGroupId:
+    Description: The ID of the Airflow services Security Group
+    Value: !Ref ServicesSecurityGroup
+
+  JobsSecurityGroupId:
+    Description: The ID of the jobs (workers/Batch/dev) Security Group
+    Value: !Ref JobsSecurityGroup
+
+  EndpointsSecurityGroupId:
+    Description: The ID of the VPC endpoints Security Group
+    Value: !Ref EndpointsSecurityGroup
+
+  RdsSecurityGroupId:
+    Description: The ID of the RDS Security Group
+    Value: !Ref RdsSecurityGroup

@@ -1,0 +1,10 @@
+# Keep local secrets out of the Docker build context so they never land in an image layer.
+
+# Environment files
+.env
+.env.*
+*.env
+.envrc
+
+# Sceptre per-environment vars (hold secret ARNs and account-specific paths)
+vars-*.yaml

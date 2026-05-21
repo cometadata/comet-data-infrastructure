@@ -1,15 +1,18 @@
 """Comet CLI."""
 
 import logging
-import sys
 from pathlib import Path
+import sys
 from typing import Annotated
 
 import cyclopts
 
+from comet.datacite.cli import datacite_app
+
 app = cyclopts.App(name="comet")
 arxiv_app = cyclopts.App(name="arxiv", help="arXiv paper processing commands.")
 app.command(arxiv_app)
+app.command(datacite_app)
 
 
 def setup_logging() -> None:
@@ -21,7 +24,7 @@ def setup_logging() -> None:
 
 
 @arxiv_app.command
-def manifest_parquet(input_file: Path, output_dir: Path = Path(".")) -> None:
+def manifest_parquet(input_file: Path, output_dir: Path = Path()) -> None:
     """Convert an arXiv manifest XML file to Parquet format."""
     setup_logging()
 
@@ -78,46 +81,6 @@ def pipeline(
 
 
 @arxiv_app.command
-def tex2md(
-    *,
-    file: Annotated[Path | None, cyclopts.Parameter(name=["-f", "--file"])] = None,
-    directory: Annotated[Path | None, cyclopts.Parameter(name=["-d", "--directory"])] = None,
-    output_dir: Annotated[Path | None, cyclopts.Parameter(name=["-o", "--output-dir"])] = None,
-    jobs: Annotated[int | None, cyclopts.Parameter(name=["-j", "--jobs"])] = None,
-    timeout: Annotated[float, cyclopts.Parameter(name=["-t", "--timeout"])] = 60.0,
-    batch_size: Annotated[int, cyclopts.Parameter(name=["-b", "--batch-size"])] = 100,
-) -> None:
-    """Convert arXiv LaTeX papers to Markdown using docling."""
-    setup_logging()
-
-    if file is not None and directory is not None:
-        print("Error: specify either -f/--file or -d/--directory, not both", file=sys.stderr)
-        raise SystemExit(1)
-    if file is None and directory is None:
-        print("Error: specify -f/--file or -d/--directory", file=sys.stderr)
-        raise SystemExit(1)
-
-    from comet.arxiv.tex2md import run_batch, run_directory, run_single
-
-    if file is not None:
-        if file.is_file():
-            run_single(file, parse_timeout=timeout)
-        elif file.is_dir():
-            if output_dir is None:
-                print("Error: -o/--output-dir is required for directory mode", file=sys.stderr)
-                raise SystemExit(1)
-            run_directory(file, output_dir, jobs=jobs, parse_timeout=timeout, batch_size=batch_size)
-        else:
-            print(f"Error: {file} is not a file or directory", file=sys.stderr)
-            raise SystemExit(1)
-    else:
-        if output_dir is None:
-            print("Error: -o/--output-dir is required for batch mode", file=sys.stderr)
-            raise SystemExit(1)
-        run_batch(directory, output_dir, jobs=jobs, parse_timeout=timeout)
-
-
-@arxiv_app.command
 def benchmark(
     *,
     extract_dir: Annotated[Path | None, cyclopts.Parameter(name="--extract-dir")] = None,
@@ -152,6 +115,7 @@ def benchmark(
 
 
 def main() -> None:
+    """Run the comet CLI."""
     app()
 
 

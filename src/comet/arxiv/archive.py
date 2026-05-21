@@ -1,13 +1,13 @@
 """Parse arXiv tar archives and extract LaTeX files to disk."""
 
+from collections.abc import Iterator
+from dataclasses import dataclass
 import enum
 import gzip
 import io
 import logging
-import tarfile
-from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
+import tarfile
 
 import magic
 
@@ -99,10 +99,11 @@ def extract_inner_tar_gz(raw: bytes, output_dir: Path) -> list[Path]:
     except (tarfile.TarError, gzip.BadGzipFile, EOFError, OSError):
         return []
 
-    tex_files = []
-    for member in members:
-        if member.isfile() and Path(member.name).suffix.lower() in TEX_EXTENSIONS:
-            tex_files.append(output_dir / member.name)
+    tex_files = [
+        output_dir / member.name
+        for member in members
+        if member.isfile() and Path(member.name).suffix.lower() in TEX_EXTENSIONS
+    ]
     return sorted(tex_files)
 
 
@@ -131,9 +132,7 @@ def classify_gz(raw: bytes, arxiv_id: str, output_dir: Path) -> tuple[list[Path]
     return [], file_type
 
 
-def classify_and_extract(
-    raw_bytes: bytes, entry_name: str, arxiv_id: str, paper_dir: Path
-) -> PaperArchive:
+def classify_and_extract(raw_bytes: bytes, entry_name: str, arxiv_id: str, paper_dir: Path) -> PaperArchive:
     """Classify raw bytes by file type and extract to disk.
 
     Branches on the entry name extension to determine how to handle the
@@ -241,7 +240,7 @@ def extract_single_archive(archive_path: Path, output_dir: Path) -> PaperArchive
 
 
 def find_main_file(files: list[Path]) -> int:
-    """Find the index of the main TeX file among candidates.
+    r"""Find the index of the main TeX file among candidates.
 
     Reads each file to check for LaTeX markers. Priority:
         1. First file with both \\documentclass and \\begin{document}

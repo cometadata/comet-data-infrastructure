@@ -4,6 +4,11 @@ env: dev
 region: us-east-1
 template_bucket: your-comet-dev-cloudformation
 
+# SSM Parameter Store path prefix for cross-step values (e.g. the Airflow image digest URI
+# written by `make push-airflow-dev`). MUST equal the SSM_PREFIX env var used by the Makefile.
+# Resolved path: {ssm_prefix}/{env}/AirflowEcrImageUri
+ssm_prefix: /your-org/comet
+
 stack_tags:
   CodeRepo: https://github.com/cometadata/comet-data-infrastructure
   Contact: ''
@@ -15,3 +20,13 @@ route_table_stack_output: ''
 public_subnet_a_stack_output: ''
 public_subnet_b_stack_output: ''
 public_subnet_c_stack_output: ''
+
+# Set to true to skip deploying the dev EC2 instance (config/dev/ec2.yaml)
+ignore_ec2: false
+
+# Secrets Manager ARN holding DataCite credentials, consumed by the
+# download-datacite AWS Batch job (config/dev/batch-jobs.yaml). Create the secret
+# out-of-band with keys `account_id` and `password`, e.g.:
+#   aws secretsmanager create-secret --name comet/dev/datacite \
+#     --secret-string '{"account_id":"<id>","password":"<password>"}'
+datacite_credentials_secret_arn: ''

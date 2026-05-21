@@ -1,0 +1,25 @@
+FROM amazonlinux:2023
+ARG PYTHON_VERSION=3.12
+
+# Pull uv into the image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN dnf install -y git tar gzip python${PYTHON_VERSION} && dnf clean all
+
+RUN uv venv --python ${PYTHON_VERSION} /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+COPY docker/marple-entrypoint.sh /usr/local/bin/marple-entrypoint
+RUN chmod +x /usr/local/bin/marple-entrypoint
+
+WORKDIR /code
+ARG MARPLE_REPO=https://gitlab.com/jdiprose/marple.git
+ARG MARPLE_REF=feature/marple-speed-improvements
+# Bump CACHEBUST to force a fresh clone
+ARG CACHEBUST=1
+RUN git clone --branch "${MARPLE_REF}" --depth 1 "${MARPLE_REPO}" /code
+RUN uv pip install --no-cache -r requirements.txt && uv pip install --no-cache .
+
+EXPOSE 8000
+ENTRYPOINT ["marple-entrypoint"]

@@ -1,9 +1,9 @@
 """Parse arXiv manifest XML files."""
 
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 
 @dataclass
@@ -33,9 +33,7 @@ def parse_file_element(elem: ET.Element) -> ManifestEntry:
         num_items=int(elem.findtext("num_items", "0").strip()),
         seq_num=int(elem.findtext("seq_num", "0").strip()),
         size=int(elem.findtext("size", "0").strip()),
-        timestamp=datetime.strptime(
-            elem.findtext("timestamp", "").strip(), "%Y-%m-%d %H:%M:%S"
-        ),
+        timestamp=datetime.strptime(elem.findtext("timestamp", "").strip(), "%Y-%m-%d %H:%M:%S"),
         yymm=elem.findtext("yymm", "").strip(),
     )
 
@@ -50,7 +48,7 @@ def parse_manifest(input_file: Path) -> list[ManifestEntry]:
         List of ManifestEntry objects, one per <file> element.
     """
     entries: list[ManifestEntry] = []
-    for _event, elem in ET.iterparse(input_file, events=("end",)):
+    for _event, elem in ET.iterparse(input_file, events=("end",)):  # noqa: S314  # input is arXiv's own trusted S3 manifest
         if elem.tag != "file":
             continue
         entries.append(parse_file_element(elem))

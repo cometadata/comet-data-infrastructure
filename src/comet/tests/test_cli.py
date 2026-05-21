@@ -6,7 +6,6 @@ import textwrap
 
 import pyarrow.parquet as pq
 
-
 SAMPLE_XML = textwrap.dedent("""\
     <?xml version='1.0' standalone='yes'?>
     <arXivSRC>
@@ -33,7 +32,16 @@ class TestManifestParquetCommand:
         out_dir = tmp_path / "output"
 
         result = subprocess.run(
-            [sys.executable, "-m", "comet.cli", "arxiv", "manifest-parquet", str(xml_file), "--output-dir", str(out_dir)],
+            [
+                sys.executable,
+                "-m",
+                "comet.cli",
+                "arxiv",
+                "manifest-parquet",
+                str(xml_file),
+                "--output-dir",
+                str(out_dir),
+            ],
             capture_output=True,
             text=True,
         )

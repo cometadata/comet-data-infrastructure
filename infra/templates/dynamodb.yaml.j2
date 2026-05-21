@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DynamoDB tables for Comet (dataset releases, future state stores)'
+
+Parameters:
+  Env:
+    Type: String
+
+Resources:
+  DatasetReleasesTable:
+    Type: 'AWS::DynamoDB::Table'
+    DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
+    Properties:
+      TableName: !Sub 'comet-${Env}-dataset-releases'
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: dataset
+          KeyType: HASH
+        - AttributeName: release_date
+          KeyType: RANGE
+      AttributeDefinitions:
+        - AttributeName: dataset
+          AttributeType: S
+        - AttributeName: release_date
+          AttributeType: S
+
+  # Attached to the batch job role from batch-jobs.yaml.
+  BatchJobDynamoDbAccess:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub 'comet-${Env}-batch-job-dynamodb-access'
+      Roles:
+        - !Sub 'comet-${Env}-batch-job-role'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'dynamodb:GetItem'
+              - 'dynamodb:PutItem'
+              - 'dynamodb:UpdateItem'
+              - 'dynamodb:Query'
+              - 'dynamodb:Scan'
+            Resource:
+              - !GetAtt DatasetReleasesTable.Arn
+
+Outputs:
+  DatasetReleasesTableName:
+    Value: !Ref DatasetReleasesTable
+  DatasetReleasesTableArn:
+    Value: !GetAtt DatasetReleasesTable.Arn

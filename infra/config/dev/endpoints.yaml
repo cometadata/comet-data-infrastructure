@@ -1,0 +1,11 @@
+template:
+  path: endpoints.j2
+  type: file
+
+parameters:
+  VpcId: !stack_attr sceptre_user_data.vpc_id
+  RouteTableId: !stack_output_external {{ var.route_table_stack_output }}
+  # Single AZ to match the rest of the stack.
+  SubnetIds:
+    - !stack_attr sceptre_user_data.public_subnet
+  SecurityGroupId: !stack_output dev/security-groups.yaml::EndpointsSecurityGroupId

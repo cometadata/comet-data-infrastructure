@@ -1,8 +1,8 @@
+from dataclasses import dataclass
 import glob
 import json
 import os
 import re
-from dataclasses import dataclass
 
 import pyarrow.parquet as pq
 
@@ -132,18 +132,12 @@ def evaluate(extractions: dict[str, str], dataset_dir: str) -> list[PaperResult]
             overlap = len(our_ng & vlm_ng)
             pr.recall = overlap / len(vlm_ng)
             pr.precision = overlap / len(our_ng)
-            pr.f1 = (
-                2 * pr.recall * pr.precision / (pr.recall + pr.precision)
-                if (pr.recall + pr.precision)
-                else 0.0
-            )
+            pr.f1 = 2 * pr.recall * pr.precision / (pr.recall + pr.precision) if (pr.recall + pr.precision) else 0.0
 
         stmts = ref["statements"]
         pr.n_statements = len(stmts)
         if stmts:
-            pr.statements_retained = sum(
-                1 for s in stmts if statement_retained(s, our_text)
-            )
+            pr.statements_retained = sum(1 for s in stmts if statement_retained(s, our_text))
 
         results.append(pr)
 
@@ -169,12 +163,11 @@ def print_report(results: list[PaperResult]):
         p75 = lambda xs: xs[3 * len(xs) // 4] if xs else 0
 
         print(f"\n{'=' * 66}")
-        print(f"  {split.upper()} split — {n} papers (+ {len(failed) if split == 'all' else sum(1 for r in failed if r.split == split)} pandoc failures)")
-        print(f"{'=' * 66}")
         print(
-            f"  {'Metric':<12} {'Mean':>8} {'Median':>8}"
-            f" {'P25':>8} {'P75':>8} {'Min':>8} {'Max':>8}"
+            f"  {split.upper()} split — {n} papers (+ {len(failed) if split == 'all' else sum(1 for r in failed if r.split == split)} pandoc failures)"
         )
+        print(f"{'=' * 66}")
+        print(f"  {'Metric':<12} {'Mean':>8} {'Median':>8} {'P25':>8} {'P75':>8} {'Min':>8} {'Max':>8}")
         for label, vals in [("Recall", recalls), ("Precision", precs), ("F1", f1s)]:
             print(
                 f"  {label:<12} {mean(vals):>8.3f} {median(vals):>8.3f}"
@@ -183,17 +176,22 @@ def print_report(results: list[PaperResult]):
             )
 
         buckets = [
-            (0, 0.2), (0.2, 0.4), (0.4, 0.6),
-            (0.6, 0.7), (0.7, 0.8), (0.8, 0.9), (0.9, 1.01),
+            (0, 0.2),
+            (0.2, 0.4),
+            (0.4, 0.6),
+            (0.6, 0.7),
+            (0.7, 0.8),
+            (0.8, 0.9),
+            (0.9, 1.01),
         ]
-        print(f"\n  Recall distribution:")
+        print("\n  Recall distribution:")
         for lo, hi in buckets:
             count = sum(1 for r in recalls if lo <= r < hi)
             bar = "#" * count
             print(f"    {lo * 100:>3.0f}-{hi * 100:>3.0f}%: {count:>3}  {bar}")
 
     print(f"\n{'=' * 66}")
-    print(f"  FUNDING STATEMENT PRESERVATION")
+    print("  FUNDING STATEMENT PRESERVATION")
     print(f"{'=' * 66}")
 
     for split in ("train", "test", "all"):
@@ -208,9 +206,7 @@ def print_report(results: list[PaperResult]):
         total_stmts = sum(r.n_statements for r in subset)
         retained_stmts = sum(r.statements_retained for r in subset)
         papers_full = sum(1 for r in subset if r.statements_retained == r.n_statements)
-        papers_partial = sum(
-            1 for r in subset if 0 < r.statements_retained < r.n_statements
-        )
+        papers_partial = sum(1 for r in subset if 0 < r.statements_retained < r.n_statements)
         papers_none = sum(1 for r in subset if r.statements_retained == 0)
 
         stmt_rate = retained_stmts / total_stmts if total_stmts else 0
@@ -218,25 +214,21 @@ def print_report(results: list[PaperResult]):
 
         print(f"\n  {split.upper()} ({len(subset)} papers with statements)")
         print(f"    Statements: {retained_stmts}/{total_stmts} retained ({stmt_rate:.1%})")
-        print(f"    Papers — all retained: {papers_full} ({paper_rate:.1%})"
-              f"  partial: {papers_partial}  none: {papers_none}")
+        print(
+            f"    Papers — all retained: {papers_full} ({paper_rate:.1%})"
+            f"  partial: {papers_partial}  none: {papers_none}"
+        )
 
-    lost = [
-        r for r in active
-        if r.n_statements > 0 and r.statements_retained < r.n_statements
-    ]
+    lost = [r for r in active if r.n_statements > 0 and r.statements_retained < r.n_statements]
     if lost:
         lost.sort(key=lambda r: r.statements_retained / r.n_statements)
         print(f"\n  Papers with missing statements ({len(lost)}):")
         print(f"    {'ID':<22} {'Split':<6} {'Kept':>5} {'Total':>6} {'F1':>6}")
         for r in lost[:20]:
-            print(
-                f"    {r.arxiv_id:<22} {r.split:<6}"
-                f" {r.statements_retained:>5} {r.n_statements:>6} {r.f1:>6.3f}"
-            )
+            print(f"    {r.arxiv_id:<22} {r.split:<6} {r.statements_retained:>5} {r.n_statements:>6} {r.f1:>6.3f}")
 
     worst = sorted(active, key=lambda r: r.f1)[:10]
-    print(f"\n  Bottom 10 by F1:")
+    print("\n  Bottom 10 by F1:")
     print(f"    {'ID':<22} {'Split':<6} {'Recall':>8} {'Prec':>8} {'F1':>8} {'Words':>12}")
     for r in worst:
         print(

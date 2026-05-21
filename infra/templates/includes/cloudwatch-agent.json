@@ -1,0 +1,33 @@
+{
+  "agent": {
+    "run_as_user": "root"
+  },
+  "metrics": {
+    "metrics_collected": {
+      "mem": {
+        "measurement": [
+          "mem_used_percent",
+          "mem_total",
+          "mem_used"
+        ],
+        "metrics_collection_interval": 60
+      },
+      "disk": {
+        "resources": [
+          "/",
+          "/data"
+        ],
+        "measurement": [
+          "used_percent",
+          "used",
+          "total"
+        ],
+        "drop_device_metrics": true,
+        "metrics_collection_interval": 60
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${!aws:InstanceId}"
+    }
+  }
+}

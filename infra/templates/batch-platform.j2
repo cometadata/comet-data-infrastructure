@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Batch compute environments and job queues for Comet'
+
+# One job queue per compute environment. Each CE is pinned to one instance type so Batch
+# can't pack two jobs onto an instance.
+# - download:                     DataCite download (disk-heavy)  m6id.xlarge   (4 vCPU,  16 GiB,  237 GB NVMe)
+# - enrich-resource-type-general: single-container enrich         c5ad.2xlarge  (8 vCPU,  16 GiB,  1x300 GB NVMe)
+# - enrich-funders:               enrich-with-ror (3 containers)  c5ad.4xlarge  (16 vCPU, 32 GiB,  2x300 GB NVMe RAID0)
+# - enrich-affiliations:          enrich-with-ror (3 containers)  c5ad.8xlarge  (32 vCPU, 64 GiB,  2x600 GB NVMe RAID0)
+# NVMe disks are mounted at /data by the launch template (2-disk instances use RAID0).
+{% set queues = [
+  {"name": "download",                     "prefix": "BatchDownload",                  "instance_types": ["m6id.xlarge"],  "max_vcpus": 16},
+  {"name": "enrich-resource-type-general", "prefix": "BatchEnrichResourceTypeGeneral", "instance_types": ["c5ad.2xlarge"], "max_vcpus": 16},
+  {"name": "enrich-funders",               "prefix": "BatchEnrichFunders",             "instance_types": ["c5ad.4xlarge"], "max_vcpus": 32},
+  {"name": "enrich-affiliations",          "prefix": "BatchEnrichAffiliations",        "instance_types": ["c5ad.8xlarge"], "max_vcpus": 64},
+] %}
+
+Parameters:
+  Env:
+    Type: String
+
+  SubnetId:
+    Type: 'AWS::EC2::Subnet::Id'
+
+  SecurityGroupId:
+    Type: String
+
+Resources:
+  # Create /aws/batch/job ourselves so it gets a retention policy.
+  BatchDefaultLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: '/aws/batch/job'
+      RetentionInDays: 14
+
+  BatchLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: !Sub 'comet-${Env}-batch-launch-template'
+      LaunchTemplateData:
+        # IMDSv2 only; stops job containers reading the instance role credentials.
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        BlockDeviceMappings:
+          - DeviceName: '/dev/xvda'
+            Ebs:
+              VolumeType: 'gp3'
+              DeleteOnTermination: true
+              VolumeSize: 30
+        UserData:
+          Fn::Base64: !Sub |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+
+            #!/bin/bash
+            set -uxo pipefail
+
+            cat > /tmp/amazon-cloudwatch-agent.json << 'CWA_SCRIPT'
+{% filter indent(12, true) %}{% include 'includes/cloudwatch-agent.json' %}{% endfilter %}
+            CWA_SCRIPT
+
+            cat > /tmp/setup-instance.sh << 'SCRIPT'
+            #!/bin/bash
+            set -uxo pipefail
+
+            dnf update -y
+
+            dnf install amazon-cloudwatch-agent mdadm htop -y
+
+{% filter indent(12, true) %}{% include 'includes/setup-data-disk.sh' %}{% endfilter %}
+            # Pre-create the OpenSearch data dir owned by uid 1000 or it can't write to /data.
+            mkdir -p /data/opensearch
+            chown 1000:1000 /data/opensearch
+
+            cp /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+            amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
+            SCRIPT
+
+            # Run the script only once on the instance
+            cloud-init-per instance setup-instance /bin/bash /tmp/setup-instance.sh
+
+            --==BOUNDARY==--
+
+  BatchServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'comet-${Env}-batch-service-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'batch.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole'
+
+  BatchInstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'comet-${Env}-batch-instance-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        # ECS agent registration and ECR pulls.
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role'
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+  BatchInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      InstanceProfileName: !Sub 'comet-${Env}-batch-instance-profile'
+      Roles:
+        - !Ref BatchInstanceRole
+
+{% for q in queues %}
+  {{ q.prefix }}ComputeEnvironment:
+    Type: 'AWS::Batch::ComputeEnvironment'
+    # Make sure the log group exists before Batch jobs write to it.
+    DependsOn:
+      - BatchDefaultLogGroup
+    Properties:
+      # Naming the CE forces delete+recreate on update.
+      Type: 'MANAGED'
+      ServiceRole: !Ref BatchServiceRole
+      ComputeResources:
+        Type: 'EC2'
+        Ec2Configuration:
+          - ImageType: 'ECS_AL2023'
+        AllocationStrategy: 'BEST_FIT_PROGRESSIVE'
+        MinvCpus: 0
+        MaxvCpus: {{ q.max_vcpus }}
+        InstanceTypes:
+{% for itype in q.instance_types %}
+          - '{{ itype }}'
+{% endfor %}
+        LaunchTemplate:
+          LaunchTemplateId: !Ref BatchLaunchTemplate
+          Version: !GetAtt BatchLaunchTemplate.LatestVersionNumber
+        Subnets:
+          - !Ref SubnetId
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        InstanceRole: !Ref BatchInstanceProfile
+
+  {{ q.prefix }}JobQueue:
+    Type: 'AWS::Batch::JobQueue'
+    Properties:
+      JobQueueName: !Sub 'comet-${Env}-batch-{{ q.name }}-job-queue'
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref {{ q.prefix }}ComputeEnvironment
+      State: 'ENABLED'
+      Priority: 1
+{% endfor %}
+
+Outputs:
+  BatchDefaultLogGroupName:
+    Value: !Ref BatchDefaultLogGroup
+{% for q in queues %}
+  {{ q.prefix }}JobQueueName:
+    Value: !Sub 'comet-${Env}-batch-{{ q.name }}-job-queue'
+  {{ q.prefix }}JobQueueArn:
+    Value: !GetAtt {{ q.prefix }}JobQueue.JobQueueArn
+{% endfor %}

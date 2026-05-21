@@ -3,13 +3,12 @@
 import contextlib
 import json
 import logging
-import os
+from pathlib import Path
 import random
 import shlex
 import shutil
 import subprocess
 import tempfile
-from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
@@ -17,6 +16,9 @@ from botocore.exceptions import ClientError
 from comet.arxiv.manifest import ManifestEntry, parse_manifest
 
 STATE_FILE = "state.json"
+
+# arXiv YYMM years <= this pivot are 20YY; greater are 19YY.
+ARXIV_YEAR_PIVOT = 30
 
 log = logging.getLogger(__name__)
 
@@ -40,9 +42,7 @@ def run_process(args: list[str]) -> None:
         raise subprocess.CalledProcessError(proc.returncode, args)
 
 
-def download_manifest(
-    s3, arxiv_bucket: str, manifest_key: str, data_dir: Path
-) -> tuple[Path, str]:
+def download_manifest(s3, arxiv_bucket: str, manifest_key: str, data_dir: Path) -> tuple[Path, str]:
     """Download the arXiv manifest via a single get_object.
 
     Streams to a temp file and atomically renames, so a partial write from
@@ -52,13 +52,11 @@ def download_manifest(
     local_path = data_dir / Path(manifest_key).name
     tmp_path = local_path.with_name(local_path.name + ".tmp")
     log.info(f"Downloading manifest s3://{arxiv_bucket}/{manifest_key} -> {local_path}")
-    resp = s3.get_object(
-        Bucket=arxiv_bucket, Key=manifest_key, RequestPayer="requester"
-    )
+    resp = s3.get_object(Bucket=arxiv_bucket, Key=manifest_key, RequestPayer="requester")
     try:
-        with contextlib.closing(resp["Body"]) as body, open(tmp_path, "wb") as f:
+        with contextlib.closing(resp["Body"]) as body, tmp_path.open("wb") as f:
             shutil.copyfileobj(body, f)
-        os.replace(tmp_path, local_path)
+        tmp_path.replace(local_path)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -67,21 +65,17 @@ def download_manifest(
 
 def get_manifest_etag(s3, arxiv_bucket: str, manifest_key: str) -> str:
     """HEAD the manifest object and return its ETag."""
-    return s3.head_object(
-        Bucket=arxiv_bucket, Key=manifest_key, RequestPayer="requester"
-    )["ETag"]
+    return s3.head_object(Bucket=arxiv_bucket, Key=manifest_key, RequestPayer="requester")["ETag"]
 
 
 def write_etag_sidecar(etag_path: Path, etag: str) -> None:
     """Atomically record an ETag next to its companion file."""
     tmp = etag_path.with_name(etag_path.name + ".tmp")
     tmp.write_text(etag)
-    os.replace(tmp, etag_path)
+    tmp.replace(etag_path)
 
 
-def download_batch(
-    entries: list[ManifestEntry], download_dir: Path, arxiv_bucket: str
-) -> None:
+def download_batch(entries: list[ManifestEntry], download_dir: Path, arxiv_bucket: str) -> None:
     """Download a batch of tars from S3 using s5cmd batch mode.
 
     Skips files that already exist locally with the expected size.
@@ -98,13 +92,9 @@ def download_batch(
         log.info("All files already downloaded, skipping s5cmd")
         return
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         for entry in to_download:
-            f.write(
-                f"cp s3://{arxiv_bucket}/{entry.filename} {download_dir}/\n"
-            )
+            f.write(f"cp s3://{arxiv_bucket}/{entry.filename} {download_dir}/\n")
         batch_file = f.name
 
     try:
@@ -113,9 +103,7 @@ def download_batch(
         Path(batch_file).unlink(missing_ok=True)
 
 
-def load_state(
-    s3, bucket: str, progress_s3_key: str, run_dir: Path
-) -> dict | None:
+def load_state(s3, bucket: str, progress_s3_key: str, run_dir: Path) -> dict | None:
     """Read the resume bookmark, preferring local then falling back to S3."""
     local = run_dir / STATE_FILE
     if not local.exists():
@@ -167,15 +155,13 @@ def reshape_batch_output(output_dir: Path) -> None:
         yy = name[10:12]
         if not yy.isdigit():
             continue
-        year = f"20{yy}" if int(yy) <= 30 else f"19{yy}"
+        year = f"20{yy}" if int(yy) <= ARXIV_YEAR_PIVOT else f"19{yy}"
         target_dir = output_dir / year
         target_dir.mkdir(exist_ok=True)
-        os.rename(entry, target_dir / name)
+        entry.rename(target_dir / name)
 
 
-def upload_batch_output(
-    output_dir: Path, bucket: str, results_s3_prefix: str
-) -> None:
+def upload_batch_output(output_dir: Path, bucket: str, results_s3_prefix: str) -> None:
     """Upload a reshaped batch ``output/`` to S3 under ``results_s3_prefix``.
 
     ``checkpoint.log`` is excluded so latex-extract's resume state stays
@@ -215,24 +201,15 @@ def run_arxiv_extract(
 ) -> None:
     """Download arXiv tars in batches and hand each batch to latex-extract.
 
-    Each batch runs inside its own ``batch_NNNNN/`` folder containing
-    ``download/`` (tars) and ``output/`` (parquet + metrics). After extract,
-    ``output/`` is reshaped into ``<YYYY>/`` subdirs (HuggingFace prefers
-    bounded file counts per directory) and uploaded to
-    ``s3://<bucket>/<release_prefix>/<release_date>/results/<YYYY>/``.
-    If ``cleanup`` is true (default), the batch folder is removed after
-    the checkpoint advances; pass ``cleanup=False`` to keep batches on
-    disk for inspection.
+    Each batch runs in its own ``batch_NNNNN/`` folder (``download/`` tars, ``output/``
+    parquet + metrics). After extract, ``output/`` is reshaped into ``<YYYY>/`` subdirs
+    (HuggingFace prefers bounded file counts per dir) and uploaded under ``results/<YYYY>/``.
+    With ``cleanup`` (default) the batch folder is removed once the checkpoint advances.
 
-    Sorting is chronological by manifest timestamp by default; pass
-    ``sort_order="largest"`` or ``sort_order="smallest"`` to order by
-    ``num_items`` descending or ascending, or ``shuffle_seed`` to randomize.
-
-    Crash resilience and memory bounds are owned by latex-extract via
-    ``--resume`` + ``--papers-per-shard`` + the two ``--max-shard-*`` flags.
-    If a batch's ``latex-extract`` invocation exits non-zero, it is retried
-    up to ``max_retries`` times (total attempts, no backoff); the run fails
-    after the final failed attempt.
+    Order is chronological by manifest timestamp; ``sort_order="largest"``/``"smallest"``
+    sorts by ``num_items``, or ``shuffle_seed`` randomizes. Resume + memory bounds are
+    latex-extract's (``--resume``, ``--papers-per-shard``, ``--max-shard-*``). A non-zero
+    ``latex-extract`` exit is retried up to ``max_retries`` times (no backoff).
     """
     s3 = boto3.client("s3")
 
@@ -246,15 +223,9 @@ def run_arxiv_extract(
     manifest_path = run_dir / Path(manifest_key).name
     etag_path = manifest_path.with_name(manifest_path.name + ".etag")
     current_etag = get_manifest_etag(s3, arxiv_bucket, manifest_key)
-    cached_etag = (
-        etag_path.read_text().strip()
-        if manifest_path.exists() and etag_path.exists()
-        else None
-    )
+    cached_etag = etag_path.read_text().strip() if manifest_path.exists() and etag_path.exists() else None
     if cached_etag != current_etag:
-        manifest_path, downloaded_etag = download_manifest(
-            s3, arxiv_bucket, manifest_key, run_dir
-        )
+        manifest_path, downloaded_etag = download_manifest(s3, arxiv_bucket, manifest_key, run_dir)
         write_etag_sidecar(etag_path, downloaded_etag)
         current_etag = downloaded_etag
     startup_etag = current_etag
@@ -263,7 +234,7 @@ def run_arxiv_extract(
     log.info(f"Parsed {len(entries)} entries from manifest")
 
     if shuffle_seed is not None:
-        random.Random(shuffle_seed).shuffle(entries)
+        random.Random(shuffle_seed).shuffle(entries)  # noqa: S311  # batch ordering, not crypto
     elif sort_order == "largest":
         entries.sort(key=lambda e: e.num_items, reverse=True)
     elif sort_order == "smallest":
@@ -280,10 +251,7 @@ def run_arxiv_extract(
         "total_entries": total_entries,
         "manifest_etag": startup_etag,
     }
-    state_paths = (
-        f"{run_dir / STATE_FILE} and "
-        f"s3://{bucket}/{progress_s3_key}"
-    )
+    state_paths = f"{run_dir / STATE_FILE} and s3://{bucket}/{progress_s3_key}"
     state = load_state(s3, bucket, progress_s3_key, run_dir)
     start_batch = 0
     if state is not None:
@@ -312,22 +280,27 @@ def run_arxiv_extract(
         download_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        log.info(
-            f"Batch {batch_idx + 1}: tars {start}–{start + len(batch) - 1}"
-        )
+        log.info(f"Batch {batch_idx + 1}: tars {start}-{start + len(batch) - 1}")
         download_batch(batch, download_dir, arxiv_bucket)
 
         extract_args = [
             "latex-extract",
-            "-d", str(download_dir),
-            "-o", str(output_dir),
-            "--output-format", "parquet",
-            "--max-shard-rows", str(max_shard_rows),
-            "--max-shard-bytes", str(max_shard_bytes),
-            "--papers-per-shard", str(papers_per_shard),
+            "-d",
+            str(download_dir),
+            "-o",
+            str(output_dir),
+            "--output-format",
+            "parquet",
+            "--max-shard-rows",
+            str(max_shard_rows),
+            "--max-shard-bytes",
+            str(max_shard_bytes),
+            "--papers-per-shard",
+            str(papers_per_shard),
             "--resume",
             "--metrics",
-            "-t", str(timeout_secs),
+            "-t",
+            str(timeout_secs),
             *(["-j", str(jobs)] if jobs is not None else []),
         ]
 
@@ -338,16 +311,16 @@ def run_arxiv_extract(
             except subprocess.CalledProcessError as exc:
                 if attempt == max_retries:
                     raise
-                log.warning(
-                    f"latex-extract failed (exit {exc.returncode}), "
-                    f"attempt {attempt}/{max_retries}; retrying"
-                )
+                log.warning(f"latex-extract failed (exit {exc.returncode}), attempt {attempt}/{max_retries}; retrying")
 
         reshape_batch_output(output_dir)
         upload_batch_output(output_dir, bucket, results_s3_prefix)
 
         save_state(
-            s3, bucket, progress_s3_key, run_dir,
+            s3,
+            bucket,
+            progress_s3_key,
+            run_dir,
             {"next_batch": batch_idx + 1, **resume_keys},
         )
 
