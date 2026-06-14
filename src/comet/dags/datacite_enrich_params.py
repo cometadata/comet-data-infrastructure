@@ -67,7 +67,7 @@ def enrich_trigger_params(params: DataCiteEnrichParams) -> dict[str, Param]:
             type="string",
             title="S3 bucket",
             description=(
-                "The Comet S3 data bucket that holds ingested datasets and enrichment outputs. "
+                "The COMET S3 data bucket that holds ingested datasets and enrichment outputs. "
                 "Here it holds the staged snapshot (input) and receives the enrichment output."
             ),
         ),

@@ -1,4 +1,4 @@
-"""Comet CLI."""
+"""COMET CLI."""
 
 import logging
 from pathlib import Path

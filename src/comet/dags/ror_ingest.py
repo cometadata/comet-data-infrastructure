@@ -45,7 +45,7 @@ def create_ror_ingest_dag(dag_id: str, params: RorIngestParams) -> DAG:
                 type="string",
                 title="S3 bucket",
                 description=(
-                    "The Comet S3 data bucket that holds ingested datasets and enrichment outputs. "
+                    "The COMET S3 data bucket that holds ingested datasets and enrichment outputs. "
                     "Here it's the destination for the ROR snapshot."
                 ),
             )

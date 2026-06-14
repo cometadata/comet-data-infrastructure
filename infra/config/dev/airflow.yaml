@@ -17,6 +17,9 @@ parameters:
   ServicesSecurityGroupId: !stack_output dev/security-groups.yaml::ServicesSecurityGroupId
   JobsSecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
   InstanceType: t3a.medium
+  TaskCpu: '2048'
+  TaskMemory: '3700'
+  ContainerMemoryReservation: '256'
   # Image URI pinned by digest so the task definition changes on every push.
   # Written by make push-airflow-dev.
   AirflowImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/AirflowEcrImageUri

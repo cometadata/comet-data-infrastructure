@@ -1,6 +1,6 @@
-# Comet Infrastructure
+# COMET Infrastructure
 
-AWS infrastructure for the Comet project, managed with
+AWS infrastructure for the COMET project, managed with
 [Sceptre](https://docs.sceptre-project.org/).
 
 ## Docs

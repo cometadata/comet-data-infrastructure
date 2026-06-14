@@ -28,6 +28,8 @@ case "$1" in
     airflow users create --username admin --role Admin \
       --password "$ADMIN_PASSWORD" --firstname Admin --lastname User \
       --email admin@example.com || true
+    # Sync the password to the secret, which is the source of truth.
+    airflow users reset-password --username admin --password "$ADMIN_PASSWORD" || true
     exec /entrypoint api-server
     ;;
   scheduler|dag-processor|triggerer)

@@ -67,7 +67,7 @@ There are four security groups, one for each group of resources. None of them ac
 
 ![Networking](img/networking.png)
 
-* `services` contains the Airflow task and its EC2 host, the only resources with access to the Airflow secrets: the database credentials, Fernet key, JWT secret, API session signing key, and admin password. The only inbound rules are port 8080 from `jobs` for the Task Execution API, and port 8080 from itself for the SSM port forward.
+* `services` contains the Airflow task and its EC2 host, the only resources with access to the Airflow secrets: the database credentials, Fernet key, JWT secret, API session signing key, and admin password. The only inbound rules are port 8080 from `jobs` for the Task Execution API, and port 8080 from itself for the SSM port forward. The EC2 host runs under an Auto Scaling group and gets an auto-assigned public IP, which the ECS agent and SSM agent use to connect outbound over the public internet. Changing the instance type replaces the host rather than stopping and starting it. The Airflow task containers have no public IPs.
 * `jobs` contains the Fargate workers, Batch instances, and the dev instance, and has no inbound rules. Workers and Batch instances have public IPs because they download external data; the Airflow services have no public IPs and reach AWS services through the VPC endpoints.
 * `endpoints` accepts 443 from `services` and `jobs`.
 * `rds` accepts 5432 from `services` only. Workers and Batch jobs cannot connect to the database; they read and write state through the api-server.
@@ -94,3 +94,4 @@ The current deployment is built for development: it favours low cost and easy te
 * Could potentially move from ECS on EC2 to plain ECS on Fargate, so that each container is independent and can handle failures better.
 * Enable Container Insights on the ECS cluster for per-task CPU/memory metrics.
 * Could enable UI access via an internal ALB with SSO.
+* Move the Airflow services and RDS into a private subnet that reaches the internet through a NAT gateway, and remove the VPC interface endpoints, keeping only the free S3 gateway endpoint. The NAT gateway replaces the endpoints for outbound access, and the EC2 host no longer needs a public IP. Workers and Batch instances stay in the public subnet with public IPs because they download external data.

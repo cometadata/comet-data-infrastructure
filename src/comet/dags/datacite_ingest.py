@@ -61,7 +61,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
                 type="string",
                 title="S3 bucket",
                 description=(
-                    "The Comet S3 data bucket that holds ingested datasets and enrichment outputs. "
+                    "The COMET S3 data bucket that holds ingested datasets and enrichment outputs. "
                     "Here it's the destination for the DataCite snapshot."
                 ),
             ),

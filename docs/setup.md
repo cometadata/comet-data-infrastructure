@@ -87,7 +87,7 @@ make install-airflow
 
 ## Open the Airflow UI
 
-There is no public ingress; the UI is reached with an SSM port-forward through the ECS host. Set the AWS region first, then forward with `session` (the instance ID is the airflow stack's `EC2InstanceId` output, or find it in the EC2 console):
+There is no public ingress; the UI is reached with an SSM port-forward through the ECS host. Set the AWS region first, then forward with `session` (find the host instance ID in the EC2 console — it is the instance in the airflow stack's Auto Scaling group):
 
 ```bash
 export AWS_DEFAULT_REGION=us-east-1

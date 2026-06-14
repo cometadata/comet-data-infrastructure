@@ -74,7 +74,7 @@
 {%- endmacro %}
 AWSTemplateFormatVersion: '2010-09-09'
 
-Description: 'Apache Airflow on ECS-on-EC2 (single task, multiple containers)'
+Description: 'Apache Airflow on ECS-on-EC2'
 
 Parameters:
   Env:
@@ -97,7 +97,22 @@ Parameters:
 
   InstanceType:
     Type: String
-    Default: t3a.medium
+    Default: t3a.small
+
+  # Hard CPU limit for the entire Airflow task (CPU units; 1024 = 1 vCPU).
+  TaskCpu:
+    Type: String
+    Default: '2048'
+
+  # Hard memory limit for the entire Airflow task (MiB).
+  TaskMemory:
+    Type: String
+    Default: '1536'
+
+  # Soft memory reservation applied to each container (MiB).
+  ContainerMemoryReservation:
+    Type: String
+    Default: '256'
 
   # ECR image URI pinned by digest.
   AirflowImage:
@@ -177,33 +192,78 @@ Resources:
       Roles:
         - !Ref EcsInstanceRole
 
-  # To change SGs, rename the logical ID: EC2 can't change SGs on multi-interface instances.
-  EcsHostInstance:
-    Type: 'AWS::EC2::Instance'
+  # ASG-owned so a resize replaces the host instead of stopping and starting it.
+  # A fresh host launches single-ENI, so an auto-assigned public IP suffices for the ECS and SSM agents.
+  EcsHostLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
     Properties:
-      InstanceType: !Ref InstanceType
-      ImageId: !Ref ImageId
-      SubnetId: !Ref SubnetId
-      SecurityGroupIds:
-        - !Ref ServicesSecurityGroupId
-      IamInstanceProfile: !Ref EcsInstanceProfile
-      # IMDSv2 only
-      MetadataOptions:
-        HttpTokens: required
-        HttpPutResponseHopLimit: 1
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-airflow'
-      BlockDeviceMappings:
-        - DeviceName: /dev/xvda
-          Ebs:
-            VolumeType: gp3
-            VolumeSize: 30
-            DeleteOnTermination: true
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          echo "ECS_CLUSTER=${EcsCluster}" >> /etc/ecs/ecs.config
+      LaunchTemplateData:
+        InstanceType: !Ref InstanceType
+        ImageId: !Ref ImageId
+        IamInstanceProfile:
+          Arn: !GetAtt EcsInstanceProfile.Arn
+        # IMDSv2 only
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref ServicesSecurityGroupId
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: 30
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo "ECS_CLUSTER=${EcsCluster}" >> /etc/ecs/ecs.config
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AWS::StackName}-airflow'
+
+  # Fixed at one instance. A launch-template change, such as a resize, rolls the instance.
+  EcsAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref SubnetId
+      LaunchTemplate:
+        LaunchTemplateId: !Ref EcsHostLaunchTemplate
+        Version: !GetAtt EcsHostLaunchTemplate.LatestVersionNumber
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 0
+        MaxBatchSize: 1
+
+  # Managed draining moves the task off the old instance before it is terminated.
+  EcsCapacityProvider:
+    Type: 'AWS::ECS::CapacityProvider'
+    Properties:
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref EcsAutoScalingGroup
+        ManagedDraining: ENABLED
+        ManagedScaling:
+          Status: DISABLED
+        ManagedTerminationProtection: DISABLED
+
+  EcsClusterCapacityProviders:
+    Type: 'AWS::ECS::ClusterCapacityProviderAssociations'
+    Properties:
+      Cluster: !Ref EcsCluster
+      CapacityProviders:
+        - !Ref EcsCapacityProvider
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref EcsCapacityProvider
+          Weight: 1
 
   AirflowS3ManagedPolicy:
     Type: 'AWS::IAM::ManagedPolicy'
@@ -402,8 +462,8 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - EC2
-      Cpu: '2048'
-      Memory: '3500'
+      Cpu: !Ref TaskCpu       # hard aggregate CPU ceiling
+      Memory: !Ref TaskMemory # hard ceiling: whole-task OOM cap + placement reservation
       ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt EcsTaskRole.Arn
       ContainerDefinitions:
@@ -411,7 +471,7 @@ Resources:
         - Name: init
           Image: !Ref AirflowImage
           Essential: false
-          MemoryReservation: 256
+          MemoryReservation: !Ref ContainerMemoryReservation
           Command:
             - init
           Environment:
@@ -430,7 +490,7 @@ Resources:
         - Name: api-server
           Image: !Ref AirflowImage
           Essential: true
-          MemoryReservation: 768
+          MemoryReservation: !Ref ContainerMemoryReservation
           DependsOn:
             - ContainerName: init
               Condition: SUCCESS
@@ -464,7 +524,7 @@ Resources:
         - Name: scheduler
           Image: !Ref AirflowImage
           Essential: true
-          MemoryReservation: 1024
+          MemoryReservation: !Ref ContainerMemoryReservation
           DependsOn:
             - ContainerName: init
               Condition: SUCCESS
@@ -496,7 +556,7 @@ Resources:
         - Name: dag-processor
           Image: !Ref AirflowImage
           Essential: true
-          MemoryReservation: 384
+          MemoryReservation: !Ref ContainerMemoryReservation
           DependsOn:
             - ContainerName: init
               Condition: SUCCESS
@@ -527,7 +587,7 @@ Resources:
         - Name: triggerer
           Image: !Ref AirflowImage
           Essential: true
-          MemoryReservation: 384
+          MemoryReservation: !Ref ContainerMemoryReservation
           DependsOn:
             - ContainerName: init
               Condition: SUCCESS
@@ -576,15 +636,21 @@ Resources:
   # Single instances of each service, so deploys cause brief downtime.
   AirflowService:
     Type: 'AWS::ECS::Service'
+    DependsOn: EcsClusterCapacityProviders
     Properties:
       ServiceName: !Sub '${AWS::StackName}-airflow'
       Cluster: !Ref EcsCluster
-      LaunchType: EC2
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref EcsCapacityProvider
+          Weight: 1
       TaskDefinition: !Ref AirflowTaskDef
       DesiredCount: 1
       DeploymentConfiguration:
         MaximumPercent: 100
         MinimumHealthyPercent: 0
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
@@ -646,9 +712,9 @@ Resources:
               awslogs-stream-prefix: airflow
 
 Outputs:
-  EC2InstanceId:
-    Description: ID of the ECS container instance — feed into 'aws ssm start-session --target ...'
-    Value: !Ref EcsHostInstance
+  EcsAsgName:
+    Description: ASG that owns the ECS host. Find the instance in the EC2 console, then 'aws ssm start-session --target <instance-id>'.
+    Value: !Ref EcsAutoScalingGroup
 
   EcsClusterName:
     Value: !Ref EcsCluster

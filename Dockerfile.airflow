@@ -1,4 +1,4 @@
-# Comet Airflow image: slim apache/airflow + amazon provider + comet package.
+# COMET Airflow image: slim apache/airflow + amazon provider + comet package.
 
 ARG AIRFLOW_VERSION
 ARG PYTHON_VERSION
