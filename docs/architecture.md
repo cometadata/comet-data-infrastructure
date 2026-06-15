@@ -2,7 +2,7 @@
 
 COMET runs data processing workflows that download and enrich external scholarly datasets such as [DataCite](https://datacite.org), [ROR](https://ror.org), and [arXiv](https://arxiv.org). [Apache Airflow 3](https://airflow.apache.org) provides the workflow orchestration layer, while ECS Fargate and AWS Batch provide the compute for processing tasks.
 
-Everything is defined in CloudFormation and deployed with [Sceptre](https://docs.sceptre-project.org/) into a VPC public subnet in a single availability zone. See [setup.md](setup.md) for how to deploy.
+Everything is defined in CloudFormation and deployed with [Sceptre](https://docs.sceptre-project.org/) into a single availability zone. The Airflow services and the metadata database run in a private subnet; the Fargate workers, Batch instances, and the dev instance run in a public subnet because they download external data. See [setup.md](setup.md) for how to deploy.
 
 ![Architecture](img/architecture.png)
 
@@ -20,13 +20,13 @@ The arXiv TeX extraction pipeline has not been moved to Airflow yet; it is run m
 
 ## Apache Airflow
 
-The Airflow services run as a single ECS task on one EC2 instance. Running the services as ECS tasks on an EC2 instance is cheaper than running each service separately on Fargate. It is also easier to define in CloudFormation than running Docker Compose directly on an EC2 instance.
+The Airflow services run as four independent ECS Fargate services, each its own task definition and service. Running them separately lets ECS restart a failed component without affecting the others. The components do not call each other; they coordinate through the metadata database.
 
 ![Airflow](img/airflow.png)
 
-The five containers:
+The four services and the init task:
 
-* `init`: runs `airflow db migrate` and `airflow fab-db migrate`, then exits. If the Fernet key is set to `NEW,OLD` for rotation, it also runs `airflow rotate-fernet-key` to re-encrypt stored connections and variables. The other containers wait on it, so the schema is always migrated before anything starts.
+* `init`: a one-off Fargate task that runs `airflow db migrate` and `airflow fab-db migrate`, then exits. If the Fernet key is set to `NEW,OLD` for rotation, it also runs `airflow rotate-fernet-key` to re-encrypt stored connections and variables. A `before_launch` hook on the services stack runs this task and waits for it to succeed before deploying the services, so the schema is always migrated first.
 * `api-server`: the UI and the Task Execution API that workers use.
 * `scheduler`: triggers DAG runs and dispatches tasks.
 * `dag-processor`: parses the DAG bundle from the DAGs bucket.
@@ -41,7 +41,7 @@ The deployment also relies on several supporting AWS services:
 * Secrets Manager stores the Fernet key, database credentials, admin password, the JWT secret for the Task Execution API, and the API server session signing key.
 * CloudWatch stores container logs.
 
-Inbound traffic from the internet is blocked; the UI is accessed with an SSM port forward (see [setup.md](setup.md)).
+Inbound traffic from the internet is blocked; the UI is accessed by port-forwarding into the api-server task with ECS Exec (see [setup.md](setup.md)).
 
 ## AWS Batch
 
@@ -61,18 +61,18 @@ The `BatchOperator` sets the command and resource sizes for each run, so the job
 
 ## Networking and security
 
-The VPC has a public subnet with an internet gateway. Airflow could alternatively be placed in a private subnet, using a NAT gateway to reach the internet. However, this would add additional cost and complexity. Everything is deployed into a single availability zone, because each additional AZ adds more VPC interface endpoints that have to be paid for. The exception is the RDS subnet group, which AWS requires to cover at least two availability zones.
+The VPC has a public subnet with an internet gateway for the Airflow Fargate jobs and the AWS Batch jobs. The VPC also has a private subnet for the Airflow services and the RDS metadata database. The private subnet has no route to the internet: the services reach the AWS APIs they need through VPC interface endpoints, and reach S3 through the free gateway endpoint. Whilst the Airflow services and the RDS metadata database have public access disabled in CloudFormation, the private subnet acts as a second layer of defense.  Everything is deployed into a single availability zone. A second private subnet in another AZ exists only to satisfy the RDS two-AZ requirement; nothing runs in it.
 
 There are four security groups, one for each group of resources. None of them accept traffic from outside the VPC; the UI and shell access go through SSM, which only needs outbound access.
 
 ![Networking](img/networking.png)
 
-* `services` contains the Airflow task and its EC2 host, the only resources with access to the Airflow secrets: the database credentials, Fernet key, JWT secret, API session signing key, and admin password. The only inbound rules are port 8080 from `jobs` for the Task Execution API, and port 8080 from itself for the SSM port forward. The EC2 host runs under an Auto Scaling group and gets an auto-assigned public IP, which the ECS agent and SSM agent use to connect outbound over the public internet. Changing the instance type replaces the host rather than stopping and starting it. The Airflow task containers have no public IPs.
-* `jobs` contains the Fargate workers, Batch instances, and the dev instance, and has no inbound rules. Workers and Batch instances have public IPs because they download external data; the Airflow services have no public IPs and reach AWS services through the VPC endpoints.
+* `services` contains the four Airflow Fargate services, the only resources with access to the Airflow secrets: the database credentials, Fernet key, JWT secret, API session signing key, and admin password. The only inbound rules are port 8080 from `jobs` for the Task Execution API, and port 8080 from itself so the components can reach the api-server. The services have no public IPs; they sit in the private subnet and reach AWS only through the VPC endpoints.
+* `jobs` contains the Fargate workers, Batch instances, and the dev instance, and has no inbound rules. They all have public IPs because they download external data.
 * `endpoints` accepts 443 from `services` and `jobs`.
 * `rds` accepts 5432 from `services` only. Workers and Batch jobs cannot connect to the database; they read and write state through the api-server.
 
-The VPC endpoints are: S3 (a free gateway endpoint), ECR (image pulls), Secrets Manager, CloudWatch Logs, ECS (used by the scheduler to launch Fargate workers), and Batch (used by the triggerer to poll job status).
+The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image layers), ECR (image pulls), Secrets Manager, CloudWatch Logs, ECS (used by the scheduler to launch Fargate workers), Batch (used by the triggerer to poll job status), and SSM messages (used by ECS Exec for the UI port-forward).
 
 ## Container images
 
@@ -87,11 +87,9 @@ Images are stored in ECR. The Airflow image is pinned by its sha256 digest, whic
 
 ## Future work
 
-The current deployment is built for development: it favours low cost and easy teardown over durability and high availability. Things to change before using it in production:
+Things to consider before using this stack in production:
 
 * Use CodePipeline and CodeBuild to automatically build the Docker images and deploy updates.
 * Set up CloudWatch alerts for CloudWatch logs and other services.
-* Could potentially move from ECS on EC2 to plain ECS on Fargate, so that each container is independent and can handle failures better.
 * Enable Container Insights on the ECS cluster for per-task CPU/memory metrics.
 * Could enable UI access via an internal ALB with SSO.
-* Move the Airflow services and RDS into a private subnet that reaches the internet through a NAT gateway, and remove the VPC interface endpoints, keeping only the free S3 gateway endpoint. The NAT gateway replaces the endpoints for outbound access, and the EC2 host no longer needs a public IP. Workers and Batch instances stay in the public subnet with public IPs because they download external data.

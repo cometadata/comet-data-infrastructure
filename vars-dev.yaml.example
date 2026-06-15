@@ -18,8 +18,10 @@ stack_tags:
 vpc_stack_output: ''
 route_table_stack_output: ''
 public_subnet_a_stack_output: ''
-public_subnet_b_stack_output: ''
-public_subnet_c_stack_output: ''
+
+# Private subnets for Airflow services + RDS: replace with real ranges.
+private_subnet_a_cidr: '10.0.0.0/24'
+private_subnet_b_cidr: '10.0.1.0/24'
 
 # Set to true to skip deploying the dev EC2 instance (config/dev/ec2.yaml)
 ignore_ec2: false

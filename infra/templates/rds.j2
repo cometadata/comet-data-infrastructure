@@ -81,6 +81,8 @@ Resources:
       MasterUserPassword: !Sub '{% raw %}{{resolve:secretsmanager:${DbCredentialsSecret}:SecretString:password}}{% endraw %}'
       DBName: airflow
       DBSubnetGroupName: !Ref DbSubnetGroup
+      # Pin the instance to AZ a, with the services.
+      AvailabilityZone: !Sub '${AWS::Region}a'
       VPCSecurityGroups:
         - !Ref RdsSecurityGroupId
       PubliclyAccessible: !Ref PubliclyAccessible

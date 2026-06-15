@@ -7,7 +7,7 @@ Parameters:
     Description: 'The VPC ID for these security groups.'
 
 Resources:
-  # Three tiers: services, jobs (zero ingress), and endpoints. Cross-SG rules are
+  # Four security groups: services, jobs (zero ingress), endpoints, and rds. Cross-SG rules are
   # standalone to avoid circular references.
   ServicesSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
@@ -29,7 +29,7 @@ Resources:
   ServicesIngressApiSelf:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
-      Description: SSM port-forward from the ECS host to the api-server task ENI
+      Description: Internal access to the api-server on 8080
       IpProtocol: tcp
       FromPort: 8080
       ToPort: 8080

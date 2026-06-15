@@ -6,21 +6,15 @@ dependencies:
   - dev/security-groups.yaml
   - dev/s3.yaml
   - dev/rds.yaml
-  - dev/endpoints.yaml
   - dev/ecr.yaml
 
 parameters:
   Env: "{{ var.env }}"
-  ImageId: !ssm '/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id'
   VpcId: !stack_attr sceptre_user_data.vpc_id
-  SubnetId: !stack_attr sceptre_user_data.public_subnet
-  ServicesSecurityGroupId: !stack_output dev/security-groups.yaml::ServicesSecurityGroupId
+  # Workers launch into the public subnet (they need public IPs to download external data).
+  WorkerSubnetId: !stack_attr sceptre_user_data.public_subnet
   JobsSecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
-  InstanceType: t3a.medium
-  TaskCpu: '2048'
-  TaskMemory: '3700'
-  ContainerMemoryReservation: '256'
-  # Image URI pinned by digest so the task definition changes on every push.
+  # Image URI pinned by digest so the task definitions change on every push.
   # Written by make push-airflow-dev.
   AirflowImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/AirflowEcrImageUri
   DagsBucketName: !stack_output dev/s3.yaml::AirflowDagsBucketName

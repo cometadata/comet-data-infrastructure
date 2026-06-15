@@ -64,7 +64,7 @@ make push-airflow-dev      # push to ECR and record the image digest in SSM
 make deploy-airflow-dev    # build, push, and roll the services
 ```
 
-`push-airflow-dev` writes the pushed image's sha256 digest URI to SSM, and the airflow stack resolves it with `!ssm`. The digest changes with the image content, so the task definition changes and ECS rolls the services; re-pushing the same tag alone would not redeploy. `ssm_prefix` in `vars-dev.yaml` and the `SSM_PREFIX` environment variable must match, and the parameter must exist before the first `sceptre launch dev/airflow.yaml` (`make deploy-airflow-dev` and `make deploy-dev` push first, so they self-bootstrap).
+`push-airflow-dev` writes the pushed image's sha256 digest URI to SSM, and the airflow stack resolves it with `!ssm`. The digest changes with the image content, so the task definition changes and ECS rolls the services; re-pushing the same tag alone would not redeploy. `ssm_prefix` in `vars-dev.yaml` and the `SSM_PREFIX` environment variable must match, and the parameter must exist before the first `sceptre launch dev/airflow-services.yaml` (`make deploy-airflow-dev` and `make deploy-dev` push first, so they self-bootstrap).
 
 To bump the Airflow version:
 
@@ -87,14 +87,14 @@ make install-airflow
 
 ## Open the Airflow UI
 
-There is no public ingress; the UI is reached with an SSM port-forward through the ECS host. Set the AWS region first, then forward with `session` (find the host instance ID in the EC2 console — it is the instance in the airflow stack's Auto Scaling group):
+There is no public ingress and no EC2 host to connect through; the UI is reached by port-forwarding into the api-server Fargate task with ECS Exec (enabled on the service). Set the AWS region, then forward with `session`, passing the ECS cluster name (from the comet-dev-airflow stack outputs or the ECS console) and the `api-server` container:
 
 ```bash
 export AWS_DEFAULT_REGION=us-east-1
-session port <ec2-id> api-server.comet.local 8080:8080
+session port <cluster-name> api-server api-server.comet.local 8080:8080
 ```
 
-Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Manager console, in the `<stackname>-admin-password` secret. It is set when the admin user is first created; rotating the secret later doesn't change it (reset it via the UI instead).
+Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Manager console, in the comet-dev-airflow stack's `-admin-password` secret. The api-server resets the admin password to this secret on each start.
 
 ## Logs
 
@@ -113,11 +113,11 @@ Generate a key with:
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-One-time setup: create the secret in the Secrets Manager console with a generated key as its value, and put its ARN into `vars-dev.yaml` as `fernet_secret_arn`.
+One-time setup: create the secret in the Secrets Manager console with a generated key as its value and the description `Airflow Fernet key that encrypts connections and variables stored in the metadata DB (AIRFLOW__CORE__FERNET_KEY)`, then put its ARN into `vars-dev.yaml` as `fernet_secret_arn`.
 
 To rotate, in the Secrets Manager console:
 
-1. Set the secret value to `<new key>,<old key>`, then force a new deployment of the airflow service (ECS console → service → Update → Force new deployment). The init container re-encrypts everything with the new key whenever it sees a comma in the value.
-2. Once the service is healthy, set the value to just `<new key>` and force a new deployment again.
+1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with `sceptre --dir infra launch dev/airflow-services.yaml` (its hook runs the init task, which re-encrypts everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by hand.
+2. Once it succeeds, set the value to just `<new key>` and run it again.
 
 Don't do step 2 until step 1's deploy is healthy: while the value is `new,old`, Airflow encrypts with the new key and decrypts with either, so a partial re-encrypt is safe; dropping the old key early would orphan rows not yet re-encrypted.

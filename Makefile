@@ -105,7 +105,7 @@ deploy-dev: check-ecr-registry check-ssm-prefix push-dev push-batch-dev push-mar
 # then roll just the airflow stack. The digest changes whenever image content changes, so the
 # task definition changes and ECS redeploys the services.
 deploy-airflow-dev: check-ecr-registry check-ssm-prefix push-airflow-dev install-infra
-> sceptre --dir infra $(SCEPTRE_VARS) --var-file=vars-dev.yaml launch dev/airflow.yaml
+> sceptre --dir infra $(SCEPTRE_VARS) --var-file=vars-dev.yaml launch dev/airflow-services.yaml
 
 check-uv:
 > @command -v uv >/dev/null 2>&1 || { echo >&2 "uv is required but not installed. Aborting."; exit 1; }
