@@ -36,6 +36,7 @@ Resources:
       ServiceName: !Sub '${AWS::StackName}-api-server'
       Cluster: !Ref ClusterName
       LaunchType: FARGATE
+      PropagateTags: SERVICE
       TaskDefinition: !Ref ApiServerTaskDefArn
       DesiredCount: 1
       EnableExecuteCommand: true
@@ -62,6 +63,7 @@ Resources:
       ServiceName: !Sub '${AWS::StackName}-scheduler'
       Cluster: !Ref ClusterName
       LaunchType: FARGATE
+      PropagateTags: SERVICE
       TaskDefinition: !Ref SchedulerTaskDefArn
       DesiredCount: 1
       DeploymentConfiguration:
@@ -84,6 +86,7 @@ Resources:
       ServiceName: !Sub '${AWS::StackName}-dag-processor'
       Cluster: !Ref ClusterName
       LaunchType: FARGATE
+      PropagateTags: SERVICE
       TaskDefinition: !Ref DagProcessorTaskDefArn
       DesiredCount: 1
       DeploymentConfiguration:
@@ -106,6 +109,7 @@ Resources:
       ServiceName: !Sub '${AWS::StackName}-triggerer'
       Cluster: !Ref ClusterName
       LaunchType: FARGATE
+      PropagateTags: SERVICE
       TaskDefinition: !Ref TriggererTaskDefArn
       DesiredCount: 1
       DeploymentConfiguration:
