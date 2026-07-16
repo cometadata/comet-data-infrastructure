@@ -10,6 +10,7 @@ from comet.aws import (
     batch_job_queue_name,
     download_source_task,
     transform_task,
+    upload_files_to_s3,
 )
 
 
@@ -51,7 +52,7 @@ class TestDownloadSourceTask:
 
 
 class TestTransformTask:
-    def test_downloads_runs_uploads_named_output_then_cleans(self, mocker, tmp_path):
+    def test_downloads_uploads_public_output_tree_then_cleans(self, mocker, tmp_path):
         def fake_local_path(*parts):
             return pathlib.Path(tmp_path, *parts)
 
@@ -66,7 +67,12 @@ class TestTransformTask:
         expected_download = stage_dir / "download"
         expected_transform = stage_dir / "transform"
 
-        with transform_task(source_uri, target_uri, upload_glob="enrichments.jsonl") as ctx:
+        with transform_task(
+            source_uri,
+            target_uri,
+            upload_glob="*",
+            upload_exclude_patterns=(".work/*",),
+        ) as ctx:
             assert ctx.download_dir == expected_download
             assert ctx.transform_dir == expected_transform
             assert ctx.target_uri == target_uri
@@ -75,8 +81,36 @@ class TestTransformTask:
             mock_clean.assert_called_once_with(target_uri)
             mock_download.assert_called_once_with(f"{source_uri}*", expected_download)
             mock_upload.assert_not_called()
-            (ctx.transform_dir / "enrichments.jsonl").write_text("{}")
+            (ctx.transform_dir / "manifest.json").write_text("{}")
 
-        mock_upload.assert_called_once_with(expected_transform, target_uri, "enrichments.jsonl")
+        mock_upload.assert_called_once_with(expected_transform, target_uri, "*", (".work/*",))
         assert not expected_download.exists()
         assert not expected_transform.exists()
+
+
+class TestUploadFilesToS3:
+    def test_adds_each_exclusion_before_source_and_destination(self, mocker, tmp_path):
+        mock_run_process = mocker.patch("comet.aws.run_process")
+
+        upload_files_to_s3(
+            tmp_path,
+            "s3://bucket/output/",
+            "*",
+            (".work/*", "*.tmp"),
+        )
+
+        mock_run_process.assert_called_once_with(
+            [
+                "s5cmd",
+                "--log",
+                "error",
+                "--stat",
+                "cp",
+                "--exclude",
+                ".work/*",
+                "--exclude",
+                "*.tmp",
+                f"{tmp_path}/*",
+                "s3://bucket/output/",
+            ]
+        )

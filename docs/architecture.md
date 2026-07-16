@@ -14,7 +14,9 @@ Two ingest DAGs run daily. Each checks the upstream source for a release newer t
 
 Heavier processing runs as AWS Batch jobs. The general pattern is to store input and output data in S3: each job downloads the data it needs to local NVMe disk, processes it, uploads the results back to S3, and exits. [s5cmd](https://github.com/peak/s5cmd) is used for the transfers because it is significantly faster than the AWS CLI for large transfers and workloads involving many files. Each job writes to an S3 path that includes the Airflow run ID, and deletes anything already at that path before it starts, so jobs can be re-run safely and don't rely on local state or a specific instance.
 
-Each DAG is created by a factory function in the `comet` package. The DAGs bucket holds a small `dags.py` entry point and a `dags.yaml` file with one entry per DAG instance; a new DAG is added by appending an entry to the YAML file (see [dags.md](dags.md)). Enrichment config files are stored on S3 (`enrichment-configs/`) and downloaded by jobs at runtime, so they can be changed without rebuilding images.
+Each DAG is created by a factory function in the `comet` package. The DAGs bucket holds a small `dags.py` entry point and a `dags.yaml` file with one entry per DAG instance; a new DAG is added by appending an entry to the YAML file (see [dags.md](dags.md)).
+
+Enrichment rules and provenance are maintained in `comet-enrich`, stored under the data bucket's `enrichment-configs/` prefix, and downloaded by Batch jobs at runtime. The infrastructure deployment does not manage these objects.
 
 The arXiv TeX extraction pipeline has not been moved to Airflow yet; it is run manually on the dev EC2 instance (see [arxiv-pipeline.md](arxiv-pipeline.md)).
 
@@ -79,7 +81,7 @@ The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image laye
 | Image           | Built from           | Runs on                                                                  |
 |-----------------|----------------------|--------------------------------------------------------------------------|
 | `comet`         | `Dockerfile`         | Dev EC2 instance (arXiv pipeline; includes arxiv-tex-extract and DuckDB) |
-| `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs (comet package + Rust enrichment CLIs)                    |
+| `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs (comet package + `comet-enrich`)                          |
 | `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs                             |
 | `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers                                     |
 

@@ -119,16 +119,23 @@ def clean_s3_prefix(s3_uri: str):
         logger.info(f"No objects found at {s3_uri}")
 
 
-def upload_files_to_s3(local_dir: pathlib.Path, s3_uri: str, glob_pattern: str = "*"):
+def upload_files_to_s3(
+    local_dir: pathlib.Path,
+    s3_uri: str,
+    glob_pattern: str = "*",
+    exclude_patterns: tuple[str, ...] = (),
+):
     """Upload files from a local directory to S3.
 
     Args:
         local_dir: The local directory containing files to upload.
         s3_uri: The destination S3 URI.
         glob_pattern: Glob pattern to match files in the local directory.
+        exclude_patterns: Relative glob patterns to exclude from the upload.
     """
     logger.info(f"Uploading from {local_dir}/{glob_pattern} to {s3_uri}")
-    run_process(s5cmd_command("cp", f"{local_dir}/{glob_pattern}", s3_uri))
+    exclude_args = [arg for pattern in exclude_patterns for arg in ("--exclude", pattern)]
+    run_process(s5cmd_command("cp", *exclude_args, f"{local_dir}/{glob_pattern}", s3_uri))
 
 
 def upload_file_to_s3(file: pathlib.Path, s3_uri: str):
@@ -260,7 +267,12 @@ class TransformTaskContext:
 
 
 @contextmanager
-def transform_task(source_uri: str, target_uri: str, upload_glob: str) -> Generator[TransformTaskContext, Any, None]:
+def transform_task(
+    source_uri: str,
+    target_uri: str,
+    upload_glob: str,
+    upload_exclude_patterns: tuple[str, ...] = (),
+) -> Generator[TransformTaskContext, Any, None]:
     """Download S3 data, yield a dir to transform into, then upload the outputs.
 
     Stages ``download`` + ``transform`` subdirs under a single local dir keyed by ``target_uri``
@@ -273,8 +285,8 @@ def transform_task(source_uri: str, target_uri: str, upload_glob: str) -> Genera
     Args:
         source_uri: The S3 URI to download source files from (trailing slash).
         target_uri: The S3 URI to upload output files to (trailing slash).
-        upload_glob: Which outputs to upload — an exact filename or a glob (e.g.
-            ``"enrichments.jsonl"`` or ``"*.jsonl"``).
+        upload_glob: Which outputs to upload — an exact filename or a glob.
+        upload_exclude_patterns: Relative glob patterns to exclude from the upload.
 
     Yields:
         A TransformTaskContext object.
@@ -299,7 +311,7 @@ def transform_task(source_uri: str, target_uri: str, upload_glob: str) -> Genera
     )
     yield ctx
 
-    upload_files_to_s3(transform_dir, target_uri, upload_glob)
+    upload_files_to_s3(transform_dir, target_uri, upload_glob, upload_exclude_patterns)
 
     # Free local disk; the next run may land on a different worker.
     shutil.rmtree(stage_dir, ignore_errors=True)

@@ -53,8 +53,8 @@ class TestDataciteEnrichResourceTypeGeneralCommand:
                     "s3://my-bucket/datacite_enrich_resource_type_general/run-1/",
                     "--rules-uri",
                     "s3://my-bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-                    "--enrichment-uri",
-                    "s3://my-bucket/enrichment-configs/resource-type-general-enrichment-metadata.yaml",
+                    "--provenance-uri",
+                    "s3://my-bucket/enrichment-configs/resource-type-general-provenance.yaml",
                 ]
             )
         assert exc_info.value.code == 0
@@ -63,7 +63,7 @@ class TestDataciteEnrichResourceTypeGeneralCommand:
             input_uri="s3://my-bucket/datacite_ingest/src-run/",
             output_uri="s3://my-bucket/datacite_enrich_resource_type_general/run-1/",
             rules_uri="s3://my-bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-            enrichment_uri="s3://my-bucket/enrichment-configs/resource-type-general-enrichment-metadata.yaml",
+            provenance_uri="s3://my-bucket/enrichment-configs/resource-type-general-provenance.yaml",
         )
 
 
@@ -83,8 +83,8 @@ class TestDataciteEnrichFundersCommand:
                     "s3://my-bucket/datacite_enrich_funders/run-1/",
                     "--ror-data-uri",
                     "s3://my-bucket/ror_ingest/ror-run/ror.zip",
-                    "--enrichment-config-uri",
-                    "s3://my-bucket/enrichment-configs/funders-enrichment-config.yaml",
+                    "--provenance-uri",
+                    "s3://my-bucket/enrichment-configs/funders-provenance.yaml",
                 ]
             )
         assert exc_info.value.code == 0
@@ -93,8 +93,8 @@ class TestDataciteEnrichFundersCommand:
             input_uri="s3://my-bucket/datacite_ingest/src-run/",
             output_uri="s3://my-bucket/datacite_enrich_funders/run-1/",
             ror_data_uri="s3://my-bucket/ror_ingest/ror-run/ror.zip",
-            enrichment_config_uri="s3://my-bucket/enrichment-configs/funders-enrichment-config.yaml",
-            marple_url="http://localhost:8000",
+            provenance_uri="s3://my-bucket/enrichment-configs/funders-provenance.yaml",
+            ror_service_url="http://localhost:8000",
         )
 
 
@@ -112,10 +112,8 @@ class TestDataciteEnrichAffiliationsCommand:
                     "s3://my-bucket/datacite_ingest/src-run/",
                     "--output-uri",
                     "s3://my-bucket/datacite_enrich_affiliations/run-1/",
-                    "--ror-data-uri",
-                    "s3://my-bucket/ror_ingest/ror-run/ror.zip",
-                    "--enrichment-config-uri",
-                    "s3://my-bucket/enrichment-configs/affiliations-enrichment-config.yaml",
+                    "--provenance-uri",
+                    "s3://my-bucket/enrichment-configs/affiliations-provenance.yaml",
                 ]
             )
         assert exc_info.value.code == 0
@@ -123,7 +121,6 @@ class TestDataciteEnrichAffiliationsCommand:
         mock_enrich.assert_called_once_with(
             input_uri="s3://my-bucket/datacite_ingest/src-run/",
             output_uri="s3://my-bucket/datacite_enrich_affiliations/run-1/",
-            ror_data_uri="s3://my-bucket/ror_ingest/ror-run/ror.zip",
-            enrichment_config_uri="s3://my-bucket/enrichment-configs/affiliations-enrichment-config.yaml",
-            marple_url="http://localhost:8000",
+            provenance_uri="s3://my-bucket/enrichment-configs/affiliations-provenance.yaml",
+            ror_service_url="http://localhost:8000",
         )

@@ -46,11 +46,11 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
                 title="Reclassification rules path",
                 description="S3 path (within the bucket) of the resourceTypeGeneral reclassification rules YAML.",
             ),
-            "enrichment_metadata_path": Param(
-                "enrichment-configs/resource-type-general-enrichment-metadata.yaml",
+            "provenance_path": Param(
+                "enrichment-configs/resource-type-general-provenance.yaml",
                 type="string",
-                title="Enrichment metadata path",
-                description="S3 path (within the bucket) of the resourceTypeGeneral enrichment metadata YAML.",
+                title="Provenance path",
+                description="S3 path (within the bucket) of the resourceTypeGeneral provenance YAML.",
             ),
         },
         user_defined_macros={
@@ -92,8 +92,8 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
                     "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
                     "--rules-uri",
                     "s3://{{ params.bucket_name }}/{{ params.rules_path }}",
-                    "--enrichment-uri",
-                    "s3://{{ params.bucket_name }}/{{ params.enrichment_metadata_path }}",
+                    "--provenance-uri",
+                    "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
                 ],
             },
             submit_job_timeout=BATCH_ATTEMPT_TIMEOUT,

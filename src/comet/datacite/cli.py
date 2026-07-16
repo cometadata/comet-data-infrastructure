@@ -2,6 +2,8 @@
 
 import cyclopts
 
+from comet.datacite.enrich import DEFAULT_ROR_SERVICE_URL
+
 datacite_app = cyclopts.App(name="datacite", help="DataCite dataset commands.")
 
 enrich_app = cyclopts.App(name="enrich", help="DataCite enrichment commands.")
@@ -42,7 +44,7 @@ def resource_type_general(
     input_uri: str,
     output_uri: str,
     rules_uri: str,
-    enrichment_uri: str,
+    provenance_uri: str,
 ) -> None:
     """Reclassify ``types.resourceTypeGeneral`` over the DataCite snapshot.
 
@@ -50,7 +52,7 @@ def resource_type_general(
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         rules_uri: S3 URI of the reclassification rules YAML.
-        enrichment_uri: S3 URI of the enrichment metadata YAML.
+        provenance_uri: S3 URI of the enrichment provenance YAML.
     """
     from comet.cli import setup_logging
     from comet.datacite import enrich
@@ -60,7 +62,7 @@ def resource_type_general(
         input_uri=input_uri,
         output_uri=output_uri,
         rules_uri=rules_uri,
-        enrichment_uri=enrichment_uri,
+        provenance_uri=provenance_uri,
     )
 
 
@@ -70,8 +72,8 @@ def funders(
     input_uri: str,
     output_uri: str,
     ror_data_uri: str,
-    enrichment_config_uri: str,
-    marple_url: str = "http://localhost:8000",
+    provenance_uri: str,
+    ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
 ) -> None:
     """Match DataCite funder names to ROR IDs over the DataCite snapshot.
 
@@ -79,8 +81,8 @@ def funders(
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         ror_data_uri: S3 URI of the ROR release zip used to reconcile matches to ROR records.
-        enrichment_config_uri: S3 URI of the funders enrichment config YAML.
-        marple_url: Base URL of the Marple ROR matcher (the sidecar on localhost in Batch).
+        provenance_uri: S3 URI of the funders provenance YAML.
+        ror_service_url: Base URL of the ROR match service.
     """
     from comet.cli import setup_logging
     from comet.datacite import enrich
@@ -90,8 +92,8 @@ def funders(
         input_uri=input_uri,
         output_uri=output_uri,
         ror_data_uri=ror_data_uri,
-        enrichment_config_uri=enrichment_config_uri,
-        marple_url=marple_url,
+        provenance_uri=provenance_uri,
+        ror_service_url=ror_service_url,
     )
 
 
@@ -100,18 +102,16 @@ def affiliations(
     *,
     input_uri: str,
     output_uri: str,
-    ror_data_uri: str,
-    enrichment_config_uri: str,
-    marple_url: str = "http://localhost:8000",
+    provenance_uri: str,
+    ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
 ) -> None:
     """Match DataCite affiliation strings to ROR IDs over the DataCite snapshot.
 
     Args:
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
-        ror_data_uri: S3 URI of the ROR release zip used to reconcile matches to ROR records.
-        enrichment_config_uri: S3 URI of the affiliations enrichment config YAML.
-        marple_url: Base URL of the Marple ROR matcher (the sidecar on localhost in Batch).
+        provenance_uri: S3 URI of the affiliations provenance YAML.
+        ror_service_url: Base URL of the ROR match service.
     """
     from comet.cli import setup_logging
     from comet.datacite import enrich
@@ -120,7 +120,6 @@ def affiliations(
     enrich.enrich_affiliations(
         input_uri=input_uri,
         output_uri=output_uri,
-        ror_data_uri=ror_data_uri,
-        enrichment_config_uri=enrichment_config_uri,
-        marple_url=marple_url,
+        provenance_uri=provenance_uri,
+        ror_service_url=ror_service_url,
     )

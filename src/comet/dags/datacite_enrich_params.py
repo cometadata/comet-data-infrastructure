@@ -3,7 +3,7 @@
 The Pydantic ``*Params`` validate the deploy-time config (``dags.yaml``); :func:`enrich_trigger_params`
 builds the Airflow ``Param`` objects that drive the Trigger form, wiring each default from the
 validated YAML value. The two concerns are kept separate — fields stay plain, form schema lives here.
-The enrichment-config URIs are NOT here — each DAG declares its own config-key Params inline.
+The rules and provenance URIs are not here; each DAG declares its S3-key Params inline.
 """
 
 from __future__ import annotations

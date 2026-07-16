@@ -7,6 +7,8 @@ import pytest
 
 from comet.aws import TransformTaskContext
 from comet.datacite.enrich import (
+    UPLOAD_EXCLUDE_PATTERNS,
+    UPLOAD_GLOB,
     enrich_affiliations,
     enrich_funders,
     enrich_resource_type_general,
@@ -14,145 +16,131 @@ from comet.datacite.enrich import (
 )
 
 
-class TestEnrichResourceTypeGeneral:
-    def test_runs_binary_with_expected_args(self, mocker, tmp_path):
-        download_dir = tmp_path / "in"
-        transform_dir = tmp_path / "out"
-        download_dir.mkdir()
-        transform_dir.mkdir()
-        ctx = TransformTaskContext(
-            download_dir=download_dir,
-            transform_dir=transform_dir,
-            target_uri="s3://bucket/datacite_enrich_resource_type_general/run-1/",
+def transform_context(tmp_path, dag_name: str) -> TransformTaskContext:
+    download_dir = tmp_path / "in"
+    transform_dir = tmp_path / "out"
+    download_dir.mkdir()
+    transform_dir.mkdir()
+    return TransformTaskContext(
+        download_dir=download_dir,
+        transform_dir=transform_dir,
+        target_uri=f"s3://bucket/{dag_name}/run-1/",
+    )
+
+
+def fake_transform_task(ctx: TransformTaskContext, captured: dict):
+    @contextmanager
+    def fake_task(source_uri, target_uri, upload_glob, upload_exclude_patterns=()):
+        captured.update(
+            source_uri=source_uri,
+            target_uri=target_uri,
+            upload_glob=upload_glob,
+            upload_exclude_patterns=upload_exclude_patterns,
         )
+        yield ctx
 
+    return fake_task
+
+
+class TestEnrichResourceTypeGeneral:
+    def test_runs_unified_binary_once(self, mocker, tmp_path):
+        ctx = transform_context(tmp_path, "datacite_enrich_resource_type_general")
         captured = {}
-
-        @contextmanager
-        def fake_task(source_uri, target_uri, upload_glob):
-            captured.update(source_uri=source_uri, target_uri=target_uri, upload_glob=upload_glob)
-            yield ctx
-
         rules_local = tmp_path / "cfg" / "rules.yaml"
-        enrichment_local = tmp_path / "cfg" / "metadata.yaml"
+        provenance_local = tmp_path / "cfg" / "provenance.yaml"
         mock_download = mocker.patch(
-            "comet.datacite.enrich.download_config", side_effect=[rules_local, enrichment_local]
+            "comet.datacite.enrich.download_config", side_effect=[rules_local, provenance_local]
         )
         mock_run_process = mocker.patch("comet.datacite.enrich.run_process")
 
-        with patch("comet.datacite.enrich.transform_task", fake_task):
+        with patch("comet.datacite.enrich.transform_task", fake_transform_task(ctx, captured)):
             enrich_resource_type_general(
                 input_uri="s3://bucket/datacite_ingest/src-run/",
-                output_uri="s3://bucket/datacite_enrich_resource_type_general/run-1/",
+                output_uri=ctx.target_uri,
                 rules_uri="s3://bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-                enrichment_uri="s3://bucket/enrichment-configs/resource-type-general-enrichment-metadata.yaml",
+                provenance_uri="s3://bucket/enrichment-configs/resource-type-general-provenance.yaml",
             )
 
-        assert captured["source_uri"] == "s3://bucket/datacite_ingest/src-run/"
-        assert captured["target_uri"] == "s3://bucket/datacite_enrich_resource_type_general/run-1/"
-        assert captured["upload_glob"] == "enrichments.jsonl"
-
-        assert [c.args[0] for c in mock_download.call_args_list] == [
+        assert captured == {
+            "source_uri": "s3://bucket/datacite_ingest/src-run/",
+            "target_uri": ctx.target_uri,
+            "upload_glob": UPLOAD_GLOB,
+            "upload_exclude_patterns": UPLOAD_EXCLUDE_PATTERNS,
+        }
+        assert [call.args[0] for call in mock_download.call_args_list] == [
             "s3://bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-            "s3://bucket/enrichment-configs/resource-type-general-enrichment-metadata.yaml",
+            "s3://bucket/enrichment-configs/resource-type-general-provenance.yaml",
         ]
-        mock_run_process.assert_called_once()
-        (cmd,), _ = mock_run_process.call_args
-        assert cmd == [
-            "comet-enrich-datacite-resource-type-general",
-            "--input",
-            str(download_dir),
-            "--output",
-            str(transform_dir / "enrichments.jsonl"),
-            "--rules",
-            str(rules_local),
-            "--enrichment",
-            str(enrichment_local),
-        ]
+        mock_run_process.assert_called_once_with(
+            [
+                "comet-enrich",
+                "resource-type-general",
+                "--input",
+                str(ctx.download_dir),
+                "--output",
+                str(ctx.transform_dir),
+                "--rules",
+                str(rules_local),
+                "--provenance",
+                str(provenance_local),
+            ]
+        )
 
 
 class TestRorEnrichers:
-    """The funders and affiliations enrichers share the same datacite-ror extract/query/reconcile
-    pipeline; only the binary name and Marple task differ."""
-
     @pytest.mark.parametrize(
-        "enrich_fn, dag_name, binary, task",
+        "enrich, subcommand, uses_ror_file",
         [
-            (enrich_funders, "datacite_enrich_funders", "comet-enrich-datacite-funders", "funder"),
-            (
-                enrich_affiliations,
-                "datacite_enrich_affiliations",
-                "comet-enrich-datacite-affiliations",
-                "affiliation",
-            ),
+            (enrich_affiliations, "affiliations", False),
+            (enrich_funders, "funders", True),
         ],
+        ids=["affiliations", "funders"],
     )
-    def test_runs_extract_query_reconcile_in_order(self, mocker, tmp_path, enrich_fn, dag_name, binary, task):
-        download_dir = tmp_path / "in"
-        transform_dir = tmp_path / "out"
-        download_dir.mkdir()
-        transform_dir.mkdir()
-        ctx = TransformTaskContext(
-            download_dir=download_dir,
-            transform_dir=transform_dir,
-            target_uri=f"s3://bucket/{dag_name}/run-1/",
-        )
-
+    def test_runs_unified_binary_and_cleans_up_ror_data(self, mocker, tmp_path, enrich, subcommand, uses_ror_file):
+        ctx = transform_context(tmp_path, f"datacite_enrich_{subcommand}")
         captured = {}
-
-        @contextmanager
-        def fake_task(source_uri, target_uri, upload_glob):
-            captured.update(source_uri=source_uri, target_uri=target_uri, upload_glob=upload_glob)
-            yield ctx
-
-        ror_data = tmp_path / "ror" / "v1.58-2026-ror-data_schema_v2.json"
-        config_local = tmp_path / "cfg" / "enrichment-config.yaml"
-        mocker.patch("comet.datacite.enrich.prepare_ror_data", return_value=ror_data)
-        mock_download = mocker.patch("comet.datacite.enrich.download_config", return_value=config_local)
+        provenance_local = tmp_path / "cfg" / "provenance.yaml"
+        provenance_uri = f"s3://bucket/enrichment-configs/{subcommand}-provenance.yaml"
+        mock_download = mocker.patch("comet.datacite.enrich.download_config", return_value=provenance_local)
         mock_run_process = mocker.patch("comet.datacite.enrich.run_process")
+        kwargs = dict(
+            input_uri="s3://bucket/datacite_ingest/src-run/",
+            output_uri=ctx.target_uri,
+            provenance_uri=provenance_uri,
+            ror_service_url="http://ror-service:8000",
+        )
+        ror_file_args = []
+        if uses_ror_file:
+            ror_data = tmp_path / "ror" / "v1.58-2026-ror-data_schema_v2.json"
+            ror_data.parent.mkdir()
+            ror_data.write_text("[]")
+            mocker.patch("comet.datacite.enrich.prepare_ror_data", return_value=ror_data)
+            kwargs["ror_data_uri"] = "s3://bucket/ror_ingest/ror-run/ror.zip"
+            ror_file_args = ["--ror-file", str(ror_data)]
 
-        with patch("comet.datacite.enrich.transform_task", fake_task):
-            enrich_fn(
-                input_uri="s3://bucket/datacite_ingest/src-run/",
-                output_uri=f"s3://bucket/{dag_name}/run-1/",
-                ror_data_uri="s3://bucket/ror_ingest/ror-run/ror.zip",
-                enrichment_config_uri="s3://bucket/enrichment-configs/enrichment-config.yaml",
-            )
+        with patch("comet.datacite.enrich.transform_task", fake_transform_task(ctx, captured)):
+            enrich(**kwargs)
 
-        assert captured["source_uri"] == "s3://bucket/datacite_ingest/src-run/"
-        assert captured["target_uri"] == f"s3://bucket/{dag_name}/run-1/"
-        assert captured["upload_glob"] == "enrichments.jsonl"
-        mock_download.assert_called_once_with("s3://bucket/enrichment-configs/enrichment-config.yaml")
-
-        commands = [call.args[0] for call in mock_run_process.call_args_list]
-        assert commands == [
-            [binary, "extract", "--input", str(download_dir), "--output", str(transform_dir)],
+        assert captured["upload_glob"] == UPLOAD_GLOB
+        assert captured["upload_exclude_patterns"] == UPLOAD_EXCLUDE_PATTERNS
+        mock_download.assert_called_once_with(provenance_uri)
+        mock_run_process.assert_called_once_with(
             [
-                binary,
-                "query",
+                "comet-enrich",
+                subcommand,
                 "--input",
-                str(transform_dir),
+                str(ctx.download_dir),
                 "--output",
-                str(transform_dir),
-                "--base-url",
-                "http://localhost:8000",
-                "--task",
-                task,
-            ],
-            [
-                binary,
-                "reconcile",
-                "--input",
-                str(transform_dir),
-                "--output",
-                str(transform_dir / "enrichments.jsonl"),
-                "--ror-data",
-                str(ror_data),
-                "--enrichment-format",
-                "--enrichment-config",
-                str(config_local),
-            ],
-        ]
+                str(ctx.transform_dir),
+                "--provenance",
+                str(provenance_local),
+                *ror_file_args,
+                "--ror-service-url",
+                "http://ror-service:8000",
+            ]
+        )
+        if uses_ror_file:
+            assert not ror_data.parent.exists()
 
 
 class TestSelectRorDataMember:

@@ -60,11 +60,11 @@ def create_datacite_enrich_funders_dag(dag_id: str, params: DataCiteEnrichFunder
                 title="ROR release date",
                 description="Which ROR release to use (YYYY-MM-DD). Empty = latest ROR release.",
             ),
-            "enrichment_config_path": Param(
-                "enrichment-configs/funders-enrichment-config.yaml",
+            "provenance_path": Param(
+                "enrichment-configs/funders-provenance.yaml",
                 type="string",
-                title="Funders enrichment config path",
-                description="S3 path (within the bucket) of the funders enrichment config YAML.",
+                title="Provenance path",
+                description="S3 path (within the bucket) of the funders provenance YAML.",
             ),
         },
         user_defined_macros={
@@ -149,8 +149,8 @@ def create_datacite_enrich_funders_dag(dag_id: str, params: DataCiteEnrichFunder
                                     "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
                                     "--ror-data-uri",
                                     ror_data_uri,
-                                    "--enrichment-config-uri",
-                                    "s3://{{ params.bucket_name }}/{{ params.enrichment_config_path }}",
+                                    "--provenance-uri",
+                                    "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
                                 ],
                             },
                         ]

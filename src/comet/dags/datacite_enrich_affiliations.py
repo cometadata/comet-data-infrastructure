@@ -51,7 +51,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                 params.ror_dag_id,
                 type="string",
                 title="ROR ingest DAG ID",
-                description="ROR ingest DAG whose snapshot seeds Marple and reconciles matches.",
+                description="ROR ingest DAG whose snapshot seeds Marple.",
             ),
             "ror_release_date": Param(
                 params.ror_release_date,
@@ -60,11 +60,11 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                 title="ROR release date",
                 description="Which ROR release to use (YYYY-MM-DD). Empty = latest ROR release.",
             ),
-            "enrichment_config_path": Param(
-                "enrichment-configs/affiliations-enrichment-config.yaml",
+            "provenance_path": Param(
+                "enrichment-configs/affiliations-provenance.yaml",
                 type="string",
-                title="Affiliations enrichment config path",
-                description="S3 path (within the bucket) of the affiliations enrichment config YAML.",
+                title="Provenance path",
+                description="S3 path (within the bucket) of the affiliations provenance YAML.",
             ),
         },
         user_defined_macros={
@@ -147,10 +147,8 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "/{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}/",
                                     "--output-uri",
                                     "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
-                                    "--ror-data-uri",
-                                    ror_data_uri,
-                                    "--enrichment-config-uri",
-                                    "s3://{{ params.bucket_name }}/{{ params.enrichment_config_path }}",
+                                    "--provenance-uri",
+                                    "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
                                 ],
                             },
                         ]

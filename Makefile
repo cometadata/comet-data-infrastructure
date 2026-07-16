@@ -42,13 +42,6 @@ push-batch-dev: check-ecr-registry build-batch
 > docker tag comet-batch:latest $(ECR_REGISTRY)/comet-dev-batch:latest
 > docker push $(ECR_REGISTRY)/comet-dev-batch:latest
 
-# Enrichment configs are not baked into the batch image; they live on S3 as the source of truth.
-# This uploads configs/ -> s3://$(DATA_BUCKET)/enrichment-configs/, the default config_uri
-# prefix the enrich jobs download from at runtime (overridable per run via the Trigger form).
-DATA_BUCKET ?= comet-dev-s3-data
-upload-configs-dev:
-> aws s3 cp configs s3://$(DATA_BUCKET)/enrichment-configs/ --recursive
-
 # Marple image (comet-dev-marple): built from Dockerfile.marple, which clones the marple
 # repo branch from GitLab. CACHEBUST forces a fresh clone each build. Requires the Marple
 # changes — create-ror-index/index-ror entry points, /health endpoint, S3 ROR fetch — see
@@ -98,7 +91,7 @@ diff-dev: install-infra
 launch-dev: install-infra
 > sceptre --dir infra $(SCEPTRE_VARS) --var-file=vars-dev.yaml launch dev$(if $(STACK),/$(STACK))
 
-deploy-dev: check-ecr-registry check-ssm-prefix push-dev push-batch-dev push-marple-dev push-airflow-dev upload-configs-dev install-infra
+deploy-dev: check-ecr-registry check-ssm-prefix push-dev push-batch-dev push-marple-dev push-airflow-dev install-infra
 > sceptre --dir infra $(SCEPTRE_VARS) --var-file=vars-dev.yaml launch dev
 
 # Iterate on the Airflow image/DAGs: rebuild, push (which records the new digest URI in SSM),

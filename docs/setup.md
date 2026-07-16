@@ -40,6 +40,17 @@ Build, push, and deploy all dev stacks:
 make deploy-dev
 ```
 
+### Enrichment configuration
+
+Once the data bucket exists, upload the rules and provenance files from the matching `comet-enrich` release or checkout through the S3 console. Use these object keys:
+
+- `enrichment-configs/resource-type-general-reclassification-rules.yaml`
+- `enrichment-configs/resource-type-general-provenance.yaml`
+- `enrichment-configs/affiliations-provenance.yaml`
+- `enrichment-configs/funders-provenance.yaml`
+
+These objects must exist before running the DataCite enrichment DAGs. Infrastructure deployment does not upload or update them.
+
 ### Manual sceptre commands
 
 For per-stack operations not covered by the Makefile:
