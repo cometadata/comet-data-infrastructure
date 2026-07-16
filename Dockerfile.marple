@@ -15,7 +15,7 @@ RUN chmod +x /usr/local/bin/marple-entrypoint
 
 WORKDIR /code
 ARG MARPLE_REPO=https://gitlab.com/jdiprose/marple.git
-ARG MARPLE_REF=feature/marple-speed-improvements
+ARG MARPLE_REF=feature/comet-marple-enhancements
 # Bump CACHEBUST to force a fresh clone
 ARG CACHEBUST=1
 RUN git clone --branch "${MARPLE_REF}" --depth 1 "${MARPLE_REPO}" /code
