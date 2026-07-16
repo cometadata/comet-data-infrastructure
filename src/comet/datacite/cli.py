@@ -2,7 +2,7 @@
 
 import cyclopts
 
-from comet.datacite.enrich import DEFAULT_ROR_SERVICE_URL
+from comet.datacite.enrich import DEFAULT_OUTPUT_WRITER_LANES, DEFAULT_ROR_SERVICE_URL
 
 datacite_app = cyclopts.App(name="datacite", help="DataCite dataset commands.")
 
@@ -45,6 +45,7 @@ def resource_type_general(
     output_uri: str,
     rules_uri: str,
     provenance_uri: str,
+    output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ) -> None:
     """Reclassify ``types.resourceTypeGeneral`` over the DataCite snapshot.
 
@@ -53,6 +54,7 @@ def resource_type_general(
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         rules_uri: S3 URI of the reclassification rules YAML.
         provenance_uri: S3 URI of the enrichment provenance YAML.
+        output_writer_lanes: Parallel writer lanes for the enrichment output.
     """
     from comet.cli import setup_logging
     from comet.datacite import enrich
@@ -63,6 +65,7 @@ def resource_type_general(
         output_uri=output_uri,
         rules_uri=rules_uri,
         provenance_uri=provenance_uri,
+        output_writer_lanes=output_writer_lanes,
     )
 
 
@@ -74,6 +77,7 @@ def funders(
     ror_data_uri: str,
     provenance_uri: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
+    output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ) -> None:
     """Match DataCite funder names to ROR IDs over the DataCite snapshot.
 
@@ -83,6 +87,7 @@ def funders(
         ror_data_uri: S3 URI of the ROR release zip used to reconcile matches to ROR records.
         provenance_uri: S3 URI of the funders provenance YAML.
         ror_service_url: Base URL of the ROR match service.
+        output_writer_lanes: Parallel writer lanes for the enrichment output.
     """
     from comet.cli import setup_logging
     from comet.datacite import enrich
@@ -94,6 +99,7 @@ def funders(
         ror_data_uri=ror_data_uri,
         provenance_uri=provenance_uri,
         ror_service_url=ror_service_url,
+        output_writer_lanes=output_writer_lanes,
     )
 
 
@@ -104,6 +110,7 @@ def affiliations(
     output_uri: str,
     provenance_uri: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
+    output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ) -> None:
     """Match DataCite affiliation strings to ROR IDs over the DataCite snapshot.
 
@@ -112,6 +119,7 @@ def affiliations(
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         provenance_uri: S3 URI of the affiliations provenance YAML.
         ror_service_url: Base URL of the ROR match service.
+        output_writer_lanes: Parallel writer lanes for the enrichment output.
     """
     from comet.cli import setup_logging
     from comet.datacite import enrich
@@ -122,4 +130,5 @@ def affiliations(
         output_uri=output_uri,
         provenance_uri=provenance_uri,
         ror_service_url=ror_service_url,
+        output_writer_lanes=output_writer_lanes,
     )

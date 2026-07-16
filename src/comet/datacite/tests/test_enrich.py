@@ -83,20 +83,24 @@ class TestEnrichResourceTypeGeneral:
                 str(rules_local),
                 "--provenance",
                 str(provenance_local),
+                "--output-writer-lanes",
+                "1",
             ]
         )
 
 
 class TestRorEnrichers:
     @pytest.mark.parametrize(
-        "enrich, subcommand, uses_ror_file",
+        "enrich, subcommand, uses_ror_file, writer_lanes",
         [
-            (enrich_affiliations, "affiliations", False),
-            (enrich_funders, "funders", True),
+            (enrich_affiliations, "affiliations", False, 32),
+            (enrich_funders, "funders", True, 1),
         ],
         ids=["affiliations", "funders"],
     )
-    def test_runs_unified_binary_and_cleans_up_ror_data(self, mocker, tmp_path, enrich, subcommand, uses_ror_file):
+    def test_runs_unified_binary_and_cleans_up_ror_data(
+        self, mocker, tmp_path, enrich, subcommand, uses_ror_file, writer_lanes
+    ):
         ctx = transform_context(tmp_path, f"datacite_enrich_{subcommand}")
         captured = {}
         provenance_local = tmp_path / "cfg" / "provenance.yaml"
@@ -108,6 +112,7 @@ class TestRorEnrichers:
             output_uri=ctx.target_uri,
             provenance_uri=provenance_uri,
             ror_service_url="http://ror-service:8000",
+            output_writer_lanes=writer_lanes,
         )
         ror_file_args = []
         if uses_ror_file:
@@ -137,6 +142,8 @@ class TestRorEnrichers:
                 *ror_file_args,
                 "--ror-service-url",
                 "http://ror-service:8000",
+                "--output-writer-lanes",
+                str(writer_lanes),
             ]
         )
         if uses_ror_file:

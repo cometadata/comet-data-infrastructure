@@ -64,6 +64,7 @@ class TestDataciteEnrichResourceTypeGeneralCommand:
             output_uri="s3://my-bucket/datacite_enrich_resource_type_general/run-1/",
             rules_uri="s3://my-bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
             provenance_uri="s3://my-bucket/enrichment-configs/resource-type-general-provenance.yaml",
+            output_writer_lanes=1,
         )
 
 
@@ -95,6 +96,7 @@ class TestDataciteEnrichFundersCommand:
             ror_data_uri="s3://my-bucket/ror_ingest/ror-run/ror.zip",
             provenance_uri="s3://my-bucket/enrichment-configs/funders-provenance.yaml",
             ror_service_url="http://localhost:8000",
+            output_writer_lanes=1,
         )
 
 
@@ -114,6 +116,8 @@ class TestDataciteEnrichAffiliationsCommand:
                     "s3://my-bucket/datacite_enrich_affiliations/run-1/",
                     "--provenance-uri",
                     "s3://my-bucket/enrichment-configs/affiliations-provenance.yaml",
+                    "--output-writer-lanes",
+                    "32",
                 ]
             )
         assert exc_info.value.code == 0
@@ -123,4 +127,5 @@ class TestDataciteEnrichAffiliationsCommand:
             output_uri="s3://my-bucket/datacite_enrich_affiliations/run-1/",
             provenance_uri="s3://my-bucket/enrichment-configs/affiliations-provenance.yaml",
             ror_service_url="http://localhost:8000",
+            output_writer_lanes=32,
         )

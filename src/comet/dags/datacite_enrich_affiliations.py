@@ -27,6 +27,7 @@ MARPLE_MEMORY = "28672"
 MARPLE_WORKERS = "20"
 MAIN_VCPU = "5"
 MAIN_MEMORY = "28672"
+WRITER_LANES = "32"
 
 BATCH_ATTEMPT_TIMEOUT = 4 * 60 * 60
 
@@ -149,6 +150,8 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
                                     "--provenance-uri",
                                     "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
+                                    "--output-writer-lanes",
+                                    WRITER_LANES,
                                 ],
                             },
                         ]

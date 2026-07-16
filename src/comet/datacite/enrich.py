@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 UPLOAD_GLOB = "*"
 UPLOAD_EXCLUDE_PATTERNS = (".work/*",)
 DEFAULT_ROR_SERVICE_URL = "http://localhost:8000"
+DEFAULT_OUTPUT_WRITER_LANES = 1
 
 
 def download_config(config_uri: str) -> pathlib.Path:
@@ -31,6 +32,7 @@ def enrich_resource_type_general(
     output_uri: str,
     rules_uri: str,
     provenance_uri: str,
+    output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ):
     """Reclassify ``types.resourceTypeGeneral`` over the DataCite snapshot."""
     rules = download_config(rules_uri)
@@ -53,6 +55,8 @@ def enrich_resource_type_general(
                 str(rules),
                 "--provenance",
                 str(provenance),
+                "--output-writer-lanes",
+                str(output_writer_lanes),
             ]
         )
 
@@ -93,6 +97,7 @@ def enrich_funders(
     ror_data_uri: str,
     provenance_uri: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
+    output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ):
     """Match DataCite funder names to ROR IDs."""
     provenance = download_config(provenance_uri)
@@ -118,6 +123,8 @@ def enrich_funders(
                     str(ror_data),
                     "--ror-service-url",
                     ror_service_url,
+                    "--output-writer-lanes",
+                    str(output_writer_lanes),
                 ]
             )
     finally:
@@ -130,6 +137,7 @@ def enrich_affiliations(
     output_uri: str,
     provenance_uri: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
+    output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ):
     """Match DataCite affiliation strings to ROR IDs."""
     provenance = download_config(provenance_uri)
@@ -151,5 +159,7 @@ def enrich_affiliations(
                 str(provenance),
                 "--ror-service-url",
                 ror_service_url,
+                "--output-writer-lanes",
+                str(output_writer_lanes),
             ]
         )

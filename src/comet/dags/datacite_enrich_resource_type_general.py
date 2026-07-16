@@ -20,6 +20,7 @@ from comet.utils import get_env
 
 ENRICH_VCPU = "8"
 ENRICH_MEMORY = "15360"
+WRITER_LANES = "1"
 
 BATCH_ATTEMPT_TIMEOUT = 3 * 60 * 60
 
@@ -94,6 +95,8 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
                     "s3://{{ params.bucket_name }}/{{ params.rules_path }}",
                     "--provenance-uri",
                     "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
+                    "--output-writer-lanes",
+                    WRITER_LANES,
                 ],
             },
             submit_job_timeout=BATCH_ATTEMPT_TIMEOUT,
