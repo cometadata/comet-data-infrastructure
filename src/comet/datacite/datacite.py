@@ -82,15 +82,16 @@ def get_new_datacite_release(
         password: DataCite password. Falls back to ``DATACITE_PASSWORD`` env var if not provided.
 
     Returns:
-        DatasetRelease with release_date set, or None if unavailable or no newer release.
+        DatasetRelease with release_date set, or None if there is no newer release (the export
+        is In progress or Uploading, or nothing was published after ``published_after``).
+
+    Raises:
+        RuntimeError: If credentials cannot be obtained, STATUS.json or MANIFEST.json cannot
+            be read or parsed, or STATUS.json reports an unexpected status value.
     """
-    try:
-        access_key_id, secret_access_key, session_token = fetch_datacite_aws_credentials(
-            account_id=account_id, password=password
-        )
-    except RuntimeError:
-        logger.exception("Failed to obtain DataCite AWS credentials")
-        return None
+    access_key_id, secret_access_key, session_token = fetch_datacite_aws_credentials(
+        account_id=account_id, password=password
+    )
 
     s3 = boto3.client(
         "s3",
@@ -102,23 +103,24 @@ def get_new_datacite_release(
     try:
         resp = s3.get_object(Bucket=datacite_bucket_name, Key="STATUS.json")
         status = json.loads(resp["Body"].read())
-    except (ClientError, json.JSONDecodeError):
-        logger.exception("Failed to read DataCite STATUS.json")
-        return None
+    except (ClientError, json.JSONDecodeError) as e:
+        raise RuntimeError("Failed to read DataCite STATUS.json") from e
 
-    if status.get("status") != "Complete":
-        logger.info(f"DataCite status is not Complete: {status.get('status')}")
+    status_value = status.get("status")
+    if status_value in ("In progress", "Uploading"):
+        logger.info(f"DataCite export not ready: {status_value}")
         return None
+    if status_value != "Complete":
+        raise RuntimeError(f"Unexpected DataCite status in STATUS.json: {status_value!r}")
 
     dt_str = status.get("datetime")
     if not dt_str:
-        return None
+        raise RuntimeError("DataCite STATUS.json is Complete but has no datetime")
 
     try:
         release_date = datetime.datetime.fromisoformat(dt_str).date()
-    except (TypeError, ValueError):
-        logger.exception(f"Failed to parse DataCite datetime from STATUS.json: {dt_str}")
-        return None
+    except (TypeError, ValueError) as e:
+        raise RuntimeError(f"Failed to parse DataCite datetime from STATUS.json: {dt_str}") from e
 
     logger.info(f"DataCite STATUS.json: status={status.get('status')} release_date={release_date}")
 

@@ -6,6 +6,7 @@ from functools import partial
 import json
 from unittest.mock import MagicMock, patch
 
+from botocore.exceptions import ClientError
 import pendulum
 import pytest
 import vcr
@@ -28,6 +29,17 @@ from comet.model.dataset_version_model import DatasetRelease
 
 DATACITE_CREDENTIALS_CASSETTE = FIXTURES_DIR / "datacite_credentials.yaml"
 DATACITE_STATUS_CASSETTE = FIXTURES_DIR / "datacite_status.yaml"
+
+
+def fake_s3_client(body_or_error):
+    client = MagicMock()
+    if isinstance(body_or_error, Exception):
+        client.get_object.side_effect = body_or_error
+    else:
+        body = MagicMock()
+        body.read.return_value = body_or_error
+        client.get_object.return_value = {"Body": body}
+    return client
 
 
 class TestFetchDataCiteAwsCredentials:
@@ -179,27 +191,49 @@ class TestGetNewDataCiteRelease:
 
         assert result is None
 
+    def mock_status(self, mocker, body_or_error):
+        mocker.patch(
+            "comet.datacite.datacite.fetch_datacite_aws_credentials",
+            return_value=("AKID", "SECRET", "TOKEN"),
+        )
+        mocker.patch("comet.datacite.datacite.boto3.client", return_value=fake_s3_client(body_or_error))
+
+    @pytest.mark.parametrize(
+        "body_or_error, match",
+        [
+            (ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject"), "STATUS.json"),
+            (b"not json", "STATUS.json"),
+            (json.dumps({"status": "Failed"}).encode(), "Unexpected"),
+            (json.dumps({"status": "Complete"}).encode(), "no datetime"),
+            (json.dumps({"status": "Complete", "datetime": "not-a-date"}).encode(), "parse"),
+        ],
+    )
+    def test_raises_on_unreadable_or_invalid_status(self, mocker, body_or_error, match):
+        self.mock_status(mocker, body_or_error)
+
+        with pytest.raises(RuntimeError, match=match):
+            self.call()
+
+    @pytest.mark.parametrize("status_value", ["In progress", "Uploading"])
+    def test_not_ready_status_returns_none(self, mocker, status_value):
+        self.mock_status(mocker, json.dumps({"status": status_value}).encode())
+
+        assert self.call() is None
+
 
 class TestFetchDataciteManifestStats:
-    def fake_client(self, body_bytes):
-        body = MagicMock()
-        body.read.return_value = body_bytes
-        client = MagicMock()
-        client.get_object.return_value = {"Body": body}
-        return client
-
     def test_counts_only_jsonl_gz_and_sums_sizes(self):
         manifest = [
             {"filename": "dois/updated_2011-03/part_0000.jsonl.gz", "size": 41, "sha256": "a"},
             {"filename": "dois/updated_2011-03/2011-03.csv.gz", "size": 375, "sha256": "b"},
             {"filename": "dois/updated_2011-12/part_0000.jsonl.gz", "size": 393763, "sha256": "c"},
         ]
-        client = self.fake_client(json.dumps(manifest).encode())
+        client = fake_s3_client(json.dumps(manifest).encode())
 
         assert fetch_datacite_manifest_stats(client, "bucket") == (2, 41 + 393763)
 
     def test_raises_on_unparseable_manifest(self):
-        client = self.fake_client(b"not json")
+        client = fake_s3_client(b"not json")
 
         with pytest.raises(RuntimeError, match="MANIFEST.json"):
             fetch_datacite_manifest_stats(client, "bucket")
