@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
+import pathlib
 import shutil
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
@@ -14,7 +15,6 @@ from comet.utils import local_path, run_process
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    import pathlib
 
     from botocore.client import BaseClient
 
@@ -200,9 +200,68 @@ def local_dir_for_uri(s3_uri: str) -> pathlib.Path:
 
     Returns:
         The local directory path.
+
+    Raises:
+        ValueError: If the URI prefix does not resolve strictly below the data directory.
     """
     _, prefix = parse_s3_uri(s3_uri)
-    return local_path(prefix.rstrip("/"))
+    prefix = prefix.rstrip("/")
+    if not prefix or ".." in prefix.split("/"):
+        raise ValueError(f"Unsafe scratch path for S3 URI: {s3_uri}")
+
+    scratch_root = local_path().resolve()
+    scratch_dir = local_path(prefix).resolve()
+    if scratch_dir == scratch_root or not scratch_dir.is_relative_to(scratch_root):
+        raise ValueError(f"Unsafe scratch path for S3 URI: {s3_uri}")
+    return scratch_dir
+
+
+def local_file_for_uri(s3_uri: str, work_dir: pathlib.Path) -> pathlib.Path:
+    """Return the local path for an S3 object URI's filename, directly inside ``work_dir``.
+
+    Args:
+        s3_uri: The S3 URI of a single object.
+        work_dir: The local directory the file must land in.
+
+    Returns:
+        The local file path.
+
+    Raises:
+        ValueError: If the URI's key does not yield a filename that resolves directly
+            inside ``work_dir`` (e.g. a bucket root, prefix, or a key ending in ``..``).
+    """
+    _, key = parse_s3_uri(s3_uri)
+    work_dir = work_dir.resolve()
+    local_file = (work_dir / pathlib.Path(key).name).resolve()
+    if local_file == work_dir or local_file.parent != work_dir:
+        raise ValueError(f"Cannot derive a local filename from S3 URI: {s3_uri}")
+    return local_file
+
+
+@contextmanager
+def staged_scratch_dir(target_uri: str) -> Generator[pathlib.Path, Any, None]:
+    """Yield a clean local stage dir for ``target_uri`` and remove it on exit.
+
+    Clears leftovers from a prior run and the target S3 prefix before yielding, so a
+    re-run with the same prefix is idempotent. The stage dir is removed even when the
+    body raises, since the next run may land on a different worker.
+
+    Args:
+        target_uri: The S3 URI whose prefix keys the stage dir.
+
+    Yields:
+        The stage directory path.
+    """
+    stage_dir = local_dir_for_uri(target_uri)
+
+    # Remove leftovers from a prior run.
+    shutil.rmtree(stage_dir, ignore_errors=True)
+    clean_s3_prefix(target_uri)
+    try:
+        yield stage_dir
+    finally:
+        # Free local disk; the next run may land on a different worker.
+        shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 @dataclass
@@ -231,24 +290,17 @@ def download_source_task(target_uri: str) -> Generator[DownloadTaskContext, Any,
     Yields:
         A DownloadTaskContext object.
     """
-    download_dir = local_dir_for_uri(target_uri)
+    with staged_scratch_dir(target_uri) as download_dir:
+        download_dir.mkdir(parents=True, exist_ok=True)
 
-    # Remove leftovers from a prior run.
-    shutil.rmtree(download_dir, ignore_errors=True)
-    clean_s3_prefix(target_uri)
-    download_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Downloading to {target_uri}")
+        ctx = DownloadTaskContext(
+            download_dir=download_dir,
+            target_uri=target_uri,
+        )
+        yield ctx
 
-    logger.info(f"Downloading to {target_uri}")
-    ctx = DownloadTaskContext(
-        download_dir=download_dir,
-        target_uri=target_uri,
-    )
-    yield ctx
-
-    upload_files_to_s3(download_dir, target_uri)
-
-    # Free local disk; the next run may land on a different worker.
-    shutil.rmtree(download_dir, ignore_errors=True)
+        upload_files_to_s3(download_dir, target_uri)
 
 
 @dataclass
@@ -291,27 +343,20 @@ def transform_task(
     Yields:
         A TransformTaskContext object.
     """
-    stage_dir = local_dir_for_uri(target_uri)
-    download_dir = stage_dir / "download"
-    transform_dir = stage_dir / "transform"
+    with staged_scratch_dir(target_uri) as stage_dir:
+        download_dir = stage_dir / "download"
+        transform_dir = stage_dir / "transform"
 
-    # Remove leftovers from a prior run.
-    shutil.rmtree(stage_dir, ignore_errors=True)
-    clean_s3_prefix(target_uri)
+        download_dir.mkdir(parents=True, exist_ok=True)
+        download_files_from_s3(f"{source_uri}*", download_dir)
+        transform_dir.mkdir(parents=True, exist_ok=True)
 
-    download_dir.mkdir(parents=True, exist_ok=True)
-    download_files_from_s3(f"{source_uri}*", download_dir)
-    transform_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Transforming {source_uri} -> {target_uri}")
+        ctx = TransformTaskContext(
+            download_dir=download_dir,
+            transform_dir=transform_dir,
+            target_uri=target_uri,
+        )
+        yield ctx
 
-    logger.info(f"Transforming {source_uri} -> {target_uri}")
-    ctx = TransformTaskContext(
-        download_dir=download_dir,
-        transform_dir=transform_dir,
-        target_uri=target_uri,
-    )
-    yield ctx
-
-    upload_files_to_s3(transform_dir, target_uri, upload_glob, upload_exclude_patterns)
-
-    # Free local disk; the next run may land on a different worker.
-    shutil.rmtree(stage_dir, ignore_errors=True)
+        upload_files_to_s3(transform_dir, target_uri, upload_glob, upload_exclude_patterns)

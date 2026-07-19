@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import zipfile
 
-from comet.aws import download_file_from_s3, parse_s3_uri, transform_task
+from comet.aws import download_file_from_s3, local_file_for_uri, transform_task
 from comet.utils import local_path, run_process
 
 logger = logging.getLogger(__name__)
@@ -20,8 +20,7 @@ def download_config(config_uri: str) -> pathlib.Path:
     """Download a configuration file from S3 and return its local path."""
     work_dir = local_path("enrichment_configs")
     work_dir.mkdir(parents=True, exist_ok=True)
-    _, key = parse_s3_uri(config_uri)
-    local_file = work_dir / pathlib.Path(key).name
+    local_file = local_file_for_uri(config_uri, work_dir)
     download_file_from_s3(config_uri, local_file)
     return local_file
 
@@ -74,12 +73,11 @@ def select_ror_data_member(members: list[str]) -> str:
 
 def prepare_ror_data(ror_data_uri: str) -> pathlib.Path:
     """Download a ROR release archive and extract its v2-schema JSON dump."""
-    _, prefix = parse_s3_uri(ror_data_uri)
     work_dir = local_path("ror_data_funders")
     shutil.rmtree(work_dir, ignore_errors=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    zip_path = work_dir / pathlib.Path(prefix).name
+    zip_path = local_file_for_uri(ror_data_uri, work_dir)
     download_file_from_s3(ror_data_uri, zip_path)
 
     with zipfile.ZipFile(zip_path) as archive:
