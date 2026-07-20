@@ -9,6 +9,16 @@ then:
 make install-infra
 ```
 
+### Local Airflow install
+
+Airflow is deliberately not in `pyproject.toml`. To import `airflow.*` modules locally:
+
+```bash
+make install-airflow
+```
+
+`uv sync` removes it again (Airflow isn't in the lock file); re-run `make install-airflow` afterwards, or use `uv sync --inexact`.
+
 ## Environment variables
 
 Set your AWS profile (must match a profile in `~/.aws/config`) and log in via SSO:
@@ -40,32 +50,7 @@ Build, push, and deploy all dev stacks:
 make deploy-dev
 ```
 
-### Enrichment configuration
-
-Once the data bucket exists, upload the rules and provenance files from the matching `comet-enrich` release or checkout through the S3 console. Use these object keys:
-
-- `enrichment-configs/resource-type-general-reclassification-rules.yaml`
-- `enrichment-configs/resource-type-general-provenance.yaml`
-- `enrichment-configs/affiliations-provenance.yaml`
-- `enrichment-configs/funders-provenance.yaml`
-
-These objects must exist before running the DataCite enrichment DAGs. Infrastructure deployment does not upload or update them.
-
-### Manual sceptre commands
-
-For per-stack operations not covered by the Makefile:
-
-```bash
-uv run sceptre --var-file=vars-dev.yaml status dev
-uv run sceptre --var-file=vars-dev.yaml launch dev/ec2.yaml
-uv run sceptre --var-file=vars-dev.yaml delete dev/ec2.yaml
-```
-
-### Templates
-
-Sceptre templates are Jinja2 (`.j2`): Sceptre renders the Jinja first, then deploys the resulting CloudFormation. Wrap literal `{{...}}` values (e.g. `{{resolve:secretsmanager:...}}`) in `{% raw %}...{% endraw %}` so Jinja doesn't evaluate them.
-
-## Airflow image
+### Airflow image
 
 The Airflow services and Fargate workers run a custom image that extends `apache/airflow:slim` with the amazon provider and the comet package. `airflow_version` and `python_version` live in `vars-dev.yaml`; both the Makefile and Sceptre read them.
 
@@ -86,15 +71,49 @@ uv run pytest
 make deploy-airflow-dev
 ```
 
-### Local Airflow install
+### Enrichment configuration
 
-Airflow is deliberately not in `pyproject.toml`. To import `airflow.*` modules locally:
+Once the data bucket exists, upload the rules and provenance files from the matching `comet-enrich` release or checkout through the S3 console. Use these object keys:
+
+- `enrichment-configs/resource-type-general-reclassification-rules.yaml`
+- `enrichment-configs/resource-type-general-provenance.yaml`
+- `enrichment-configs/affiliations-provenance.yaml`
+- `enrichment-configs/funders-provenance.yaml`
+
+These objects must exist before running the DataCite enrichment DAGs. Infrastructure deployment does not upload or update them.
+
+### DataCite credentials
+
+Configure the DataCite account ID and password in two places: Secrets Manager for the `download-datacite` Batch job and an Airflow connection for the `datacite_ingest` DAG.
+
+For the Batch job, create an "other type of secret" with `account_id` and `password` keys. Name it `comet-<env>-batch-datacite-credentials` and set its ARN as `datacite_credentials_secret_arn` in `vars-dev.yaml`.
+
+For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui)), go to Admin → Connections, and add a connection with these fields:
+
+- Connection Id: `datacite`
+- Connection Type: `Generic`
+- Login: the DataCite account ID
+- Password: the DataCite password
+
+Only Login and Password are used. Leave Description, Host, Schema, Port, and Extra empty.
+
+Create the connection before running `datacite_ingest`; `fetch_release` fails if it is missing. `datacite_conn_name` defaults to `datacite`.
+
+Airflow stores the connection in its metadata database and encrypts it with the [Fernet key](#rotating-the-fernet-key). Stack deployments do not manage the connection. When rotating the credentials, update both the secret and the connection.
+
+### Manual sceptre commands
+
+For per-stack operations not covered by the Makefile:
 
 ```bash
-make install-airflow
+uv run sceptre --var-file=vars-dev.yaml status dev
+uv run sceptre --var-file=vars-dev.yaml launch dev/ec2.yaml
+uv run sceptre --var-file=vars-dev.yaml delete dev/ec2.yaml
 ```
 
-`uv sync` removes it again (Airflow isn't in the lock file); re-run `make install-airflow` afterwards, or use `uv sync --inexact`.
+### Templates
+
+Sceptre templates are Jinja2 (`.j2`): Sceptre renders the Jinja first, then deploys the resulting CloudFormation. Wrap literal `{{...}}` values (e.g. `{{resolve:secretsmanager:...}}`) in `{% raw %}...{% endraw %}` so Jinja doesn't evaluate them.
 
 ## Open the Airflow UI
 
