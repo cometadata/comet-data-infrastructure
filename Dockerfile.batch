@@ -1,0 +1,61 @@
+FROM amazonlinux:2023
+ARG COMET_ENRICH_VERSION="v0.1.0-rc2"
+ARG COMET_ENRICH_TARGET="x86_64-v3-unknown-linux-gnu"
+ARG S5CMD_VERSION="2.3.0"
+ARG PYTHON_VERSION="3.12"
+ENV S5CMD_VERSION=${S5CMD_VERSION}
+ENV PYTHON_VERSION=${PYTHON_VERSION}
+
+# Pull uv into image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN dnf install -y \
+    aws-cli \
+    bash-completion \
+    tar \
+    gzip \
+    wget \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-pip && \
+    dnf clean all
+
+ENV TMPDIR=/data/tmp
+RUN mkdir -p ${TMPDIR}
+
+WORKDIR /app
+
+# Install s5cmd
+RUN wget https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz && \
+    tar -xzf s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz s5cmd && \
+    chmod 755 s5cmd && \
+    mv s5cmd /usr/local/bin/ && \
+    rm s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz
+
+# Readiness-wait entrypoint
+COPY docker/batch-entrypoint.sh /usr/local/bin/comet-batch-entrypoint
+RUN chmod 755 /usr/local/bin/comet-batch-entrypoint
+
+# Sync Python dependencies
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --no-dev --python ${PYTHON_VERSION}
+
+# Install the pinned comet-enrich release and Bash completions.
+RUN COMET_ENRICH_ASSET="comet-enrich-${COMET_ENRICH_VERSION}-${COMET_ENRICH_TARGET}.tar.gz" && \
+    COMET_ENRICH_URL="https://github.com/cometadata/comet-enrich/releases/download/${COMET_ENRICH_VERSION}/${COMET_ENRICH_ASSET}" && \
+    wget "${COMET_ENRICH_URL}" && \
+    wget "${COMET_ENRICH_URL}.sha256" && \
+    sha256sum -c "${COMET_ENRICH_ASSET}.sha256" && \
+    tar -xzf "${COMET_ENRICH_ASSET}" -C /usr/local/bin comet-enrich && \
+    chmod 755 /usr/local/bin/comet-enrich && \
+    mkdir -p /usr/share/bash-completion/completions && \
+    comet-enrich completions bash > /usr/share/bash-completion/completions/comet-enrich && \
+    comet-enrich --version && \
+    rm "${COMET_ENRICH_ASSET}" "${COMET_ENRICH_ASSET}.sha256"
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Install comet package
+COPY src/ src/
+RUN uv sync --frozen --no-dev --python ${PYTHON_VERSION}
+
+ENTRYPOINT ["comet-batch-entrypoint"]

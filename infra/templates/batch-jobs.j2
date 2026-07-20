@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Batch job definitions and roles for COMET'
+
+Parameters:
+  Env:
+    Type: String
+
+  # ECR repo names from the ecr stack.
+  BatchRepositoryName:
+    Type: String
+
+  MarpleRepositoryName:
+    Type: String
+
+  EcrImageTag:
+    Type: String
+    Default: latest
+
+  S3BucketID:
+    Type: String
+
+  # Pin a version that matches Marple.
+  OpenSearchImage:
+    Type: String
+    Default: 'public.ecr.aws/opensearchproject/opensearch:2.17.1'
+
+  # Secrets Manager secret with DataCite credentials (created out-of-band).
+  DataCiteCredentialsSecretArn:
+    Type: String
+
+Resources:
+  # Declared so it gets a retention policy.
+  BatchLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/batch/job'
+      RetentionInDays: 14
+
+  # Task role for all job containers.
+  BatchJobRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'comet-${Env}-batch-job-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ecs-tasks.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
+      Policies:
+        - PolicyName: 'CometDataBucketS3Policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:DeleteObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketID}'
+                  - !Sub 'arn:aws:s3:::${S3BucketID}/*'
+
+  # Lets ECS inject the DataCite secret.
+  DataCiteJobExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub 'comet-${Env}-batch-datacite-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ecs-tasks.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+        - PolicyName: 'DataCiteSecretAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'kms:Decrypt'
+                Resource: !Ref DataCiteCredentialsSecretArn
+
+  # download-datacite: command overriden by BatchOperator.
+  DownloadDataCiteJob:
+    Type: 'AWS::Batch::JobDefinition'
+    Properties:
+      Type: 'Container'
+      JobDefinitionName: !Sub 'comet-${Env}-download-datacite-job'
+      PlatformCapabilities:
+        - 'EC2'
+      ContainerProperties:
+        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+        Vcpus: 1
+        Memory: 2048
+        JobRoleArn: !GetAtt BatchJobRole.Arn
+        ExecutionRoleArn: !GetAtt DataCiteJobExecutionRole.Arn
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref BatchLogGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: download-datacite
+        Volumes:
+          - Host:
+              SourcePath: '/data'
+            Name: 'data-volume'
+        MountPoints:
+          - SourceVolume: 'data-volume'
+            ContainerPath: '/data'
+            ReadOnly: false
+        Secrets:
+          - Name: DATACITE_ACCOUNT_ID
+            ValueFrom: !Sub '${DataCiteCredentialsSecretArn}:account_id::'
+          - Name: DATACITE_PASSWORD
+            ValueFrom: !Sub '${DataCiteCredentialsSecretArn}:password::'
+        Command:
+          - /bin/bash
+          - -c
+          - 'echo "download-datacite"'
+
+  # enrich-job: command overriden by BatchOperator.
+  EnrichJob:
+    Type: 'AWS::Batch::JobDefinition'
+    Properties:
+      Type: 'Container'
+      JobDefinitionName: !Sub 'comet-${Env}-enrich-job'
+      PlatformCapabilities:
+        - 'EC2'
+      ContainerProperties:
+        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+        Vcpus: 1
+        Memory: 2048
+        JobRoleArn: !GetAtt BatchJobRole.Arn
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref BatchLogGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: enrich
+        Volumes:
+          - Host:
+              SourcePath: '/data'
+            Name: 'data-volume'
+        MountPoints:
+          - SourceVolume: 'data-volume'
+            ContainerPath: '/data'
+            ReadOnly: false
+        Command:
+          - /bin/bash
+          - -c
+          - 'echo "enrich placeholder"'
+
+  # enrich-with-ror: opensearch + marple + main containers, sized for c5ad.xlarge.
+  EnrichWithRorJob:
+    Type: 'AWS::Batch::JobDefinition'
+    Properties:
+      Type: 'Container'
+      JobDefinitionName: !Sub 'comet-${Env}-enrich-with-ror-job'
+      PlatformCapabilities:
+        - 'EC2'
+      Timeout:
+        AttemptDurationSeconds: 3600
+      EcsProperties:
+        TaskProperties:
+          - TaskRoleArn: !GetAtt BatchJobRole.Arn
+            Volumes:
+              - Name: 'data-volume'
+                Host:
+                  SourcePath: '/data'
+            Containers:
+              - Name: opensearch
+                Image: !Ref OpenSearchImage
+                Essential: false
+                ResourceRequirements:
+                  - Type: VCPU
+                    Value: '1'
+                  - Type: MEMORY
+                    Value: '2048'
+                Environment:
+                  - Name: discovery.type
+                    Value: single-node
+                  - Name: DISABLE_SECURITY_PLUGIN
+                    Value: 'true'
+                  - Name: DISABLE_INSTALL_DEMO_CONFIG
+                    Value: 'true'
+                  - Name: bootstrap.memory_lock
+                    Value: 'false'
+                  # Keep the heap under the MEMORY cap.
+                  - Name: OPENSEARCH_JAVA_OPTS
+                    Value: '-Xms1g -Xmx1g'
+                  - Name: path.data
+                    Value: /data/opensearch
+                MountPoints:
+                  - SourceVolume: 'data-volume'
+                    ContainerPath: '/data'
+                    ReadOnly: false
+                LogConfiguration:
+                  LogDriver: awslogs
+                  Options:
+                    awslogs-group: !Ref BatchLogGroup
+                    awslogs-region: !Ref AWS::Region
+                    awslogs-stream-prefix: enrich-with-ror
+              - Name: marple
+                Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MarpleRepositoryName}:${EcrImageTag}'
+                Essential: false
+                DependsOn:
+                  - ContainerName: opensearch
+                    Condition: START
+                ResourceRequirements:
+                  - Type: VCPU
+                    Value: '1'
+                  - Type: MEMORY
+                    Value: '2816'
+                Environment:
+                  - Name: ES_HOST_DEV
+                    Value: localhost
+                  - Name: ES_PORT
+                    Value: '9200'
+                  - Name: MARPLE_WORKERS
+                    Value: '2'
+                  # Overridden per run by the BatchOperator.
+                  - Name: ROR_S3_URI
+                    Value: ''
+                MountPoints:
+                  - SourceVolume: 'data-volume'
+                    ContainerPath: '/data'
+                    ReadOnly: false
+                LogConfiguration:
+                  LogDriver: awslogs
+                  Options:
+                    awslogs-group: !Ref BatchLogGroup
+                    awslogs-region: !Ref AWS::Region
+                    awslogs-stream-prefix: enrich-with-ror
+              - Name: main
+                Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+                Essential: true
+                DependsOn:
+                  - ContainerName: marple
+                    Condition: START
+                ResourceRequirements:
+                  - Type: VCPU
+                    Value: '1'
+                  - Type: MEMORY
+                    Value: '2816'
+                Environment:
+                  # The entrypoint waits for Marple to be ready before running the command.
+                  - Name: WAIT_FOR_ROR_READY
+                    Value: '1'
+                MountPoints:
+                  - SourceVolume: 'data-volume'
+                    ContainerPath: '/data'
+                    ReadOnly: false
+                LogConfiguration:
+                  LogDriver: awslogs
+                  Options:
+                    awslogs-group: !Ref BatchLogGroup
+                    awslogs-region: !Ref AWS::Region
+                    awslogs-stream-prefix: enrich-with-ror
+                Command:
+                  - /bin/bash
+                  - -c
+                  - 'echo "enrich-with-ror"'
+
+Outputs:
+  BatchLogGroupName:
+    Value: !Ref BatchLogGroup
+  BatchJobRoleArn:
+    Value: !GetAtt BatchJobRole.Arn
+  DownloadDataCiteJobDefinitionArn:
+    Value: !Ref DownloadDataCiteJob
+  EnrichJobDefinitionArn:
+    Value: !Ref EnrichJob
+  EnrichWithRorJobDefinitionArn:
+    Value: !Ref EnrichWithRorJob

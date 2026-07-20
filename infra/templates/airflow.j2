@@ -1,0 +1,646 @@
+{#- Shared values #}
+{%- set dns_namespace = "comet.local" %}
+{%- set api_server_name = "api-server" %}
+{%- set api_url = "http://" ~ api_server_name ~ "." ~ dns_namespace ~ ":8080" %}
+
+{#- Secrets for the services. Workers get none. #}
+{%- macro common_secrets() %}
+            - Name: AIRFLOW__CORE__FERNET_KEY
+              ValueFrom: !Ref FernetSecretArn
+            - Name: AIRFLOW__API_AUTH__JWT_SECRET
+              ValueFrom: !Ref JwtSecret
+            - Name: DB_HOST
+              ValueFrom: !Sub '${DbCredentialsSecretArn}:host::'
+            - Name: DB_PORT
+              ValueFrom: !Sub '${DbCredentialsSecretArn}:port::'
+            - Name: DB_USER
+              ValueFrom: !Sub '${DbCredentialsSecretArn}:username::'
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub '${DbCredentialsSecretArn}:password::'
+            - Name: DB_NAME
+              ValueFrom: !Sub '${DbCredentialsSecretArn}:dbname::'
+{%- endmacro %}
+{#- Remote logging + S3 DAG bundle env. #}
+{%- macro dag_bundle_env(refresh_interval) %}
+            - Name: AIRFLOW__LOGGING__REMOTE_LOGGING
+              Value: 'True'
+            - Name: AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER
+              Value: !Sub 's3://${LogsBucketName}/logs'
+            - Name: AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID
+              Value: aws_default
+            - Name: AIRFLOW__LOGGING__ENCRYPT_S3_LOGS
+              Value: 'False'
+            - Name: AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST
+              Value: !Sub '[{"name":"s3_dags","classpath":"airflow.providers.amazon.aws.bundles.s3.S3DagBundle","kwargs":{"bucket_name":"${DagsBucketName}","prefix":"","aws_conn_id":"aws_default","refresh_interval":{{ refresh_interval }}}}]'
+{%- endmacro %}
+{#- Executor config for the scheduler and api-server. #}
+{%- macro ecs_executor_env() %}
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: 'airflow.providers.amazon.aws.executors.ecs.ecs_executor.AwsEcsExecutor'
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__REGION_NAME
+              Value: !Ref AWS::Region
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__CLUSTER
+              Value: !Ref EcsCluster
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__CONTAINER_NAME
+              Value: worker
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__TASK_DEFINITION
+              Value: !Ref AirflowWorkerTaskDef
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__LAUNCH_TYPE
+              Value: FARGATE
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__PLATFORM_VERSION
+              Value: LATEST
+            # Workers need a public IP to download external data.
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__ASSIGN_PUBLIC_IP
+              Value: 'True'
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__SECURITY_GROUPS
+              Value: !Ref JobsSecurityGroupId
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__SUBNETS
+              Value: !Ref WorkerSubnetId
+{%- endmacro %}
+{#- Airflow + AWS env shared by every service container. #}
+{%- macro common_env(api_base_url) %}
+            - Name: AIRFLOW__CORE__AUTH_MANAGER
+              Value: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+            - Name: AIRFLOW__CORE__LOAD_EXAMPLES
+              Value: 'False'
+            - Name: AIRFLOW__API__BASE_URL
+              Value: '{{ api_base_url }}'
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AWS::Region
+            # Read by the comet package.
+            - Name: AWS_ENV
+              Value: !Ref Env
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+{%- endmacro %}
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Apache Airflow template: cluster, roles, task definitions, service discovery'
+
+Parameters:
+  Env:
+    Type: String
+
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+
+  # Public subnet the ECS executor launches Fargate workers into (they need public IPs).
+  WorkerSubnetId:
+    Type: 'AWS::EC2::Subnet::Id'
+
+  JobsSecurityGroupId:
+    Type: String
+
+  # ECR image URI pinned by digest.
+  AirflowImage:
+    Type: String
+
+  DagsBucketName:
+    Type: String
+
+  DagsBucketArn:
+    Type: String
+
+  LogsBucketName:
+    Type: String
+
+  LogsBucketArn:
+    Type: String
+
+  DataBucketArn:
+    Type: String
+
+  DbCredentialsSecretArn:
+    Type: String
+
+  FernetSecretArn:
+    Type: String
+
+Resources:
+  JwtSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Sub '${AWS::StackName}-jwt'
+      Description: 'JWT signing secret for the Task Execution API that workers use (AIRFLOW__API_AUTH__JWT_SECRET)'
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+
+  AdminPasswordSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Sub '${AWS::StackName}-admin-password'
+      Description: 'Airflow admin user password; the api-server resets the admin login to this on each start'
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  ApiSecretKey:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Sub '${AWS::StackName}-api-secret-key'
+      Description: 'Flask session signing key for the api-server (AIRFLOW__API__SECRET_KEY)'
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+
+  EcsCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+
+  AirflowS3ManagedPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: 'Read DAGs from S3, write task logs to S3'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:ListBucket'
+              - 's3:ListBucketVersions'
+            Resource:
+              - !Ref DagsBucketArn
+              - !Sub '${DagsBucketArn}/*'
+          - Effect: Allow
+            Action:
+              - 's3:PutObject'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:AbortMultipartUpload'
+            Resource:
+              - !Ref LogsBucketArn
+              - !Sub '${LogsBucketArn}/*'
+
+  EcsTaskExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+        - PolicyName: task-exec-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'secretsmanager:DescribeSecret'
+                Resource:
+                  - !Ref FernetSecretArn
+                  - !Ref JwtSecret
+                  - !Ref AdminPasswordSecret
+                  - !Ref ApiSecretKey
+                  - !Ref DbCredentialsSecretArn
+
+  EcsTaskRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref AirflowS3ManagedPolicy
+      Policies:
+        # Lets the scheduler launch and track Fargate workers.
+        - PolicyName: airflow-ecs-executor
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'ecs:RunTask'
+                Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${AWS::StackName}-worker:*'
+                Condition:
+                  ArnEquals:
+                    'ecs:cluster': !GetAtt EcsCluster.Arn
+              - Effect: Allow
+                Action:
+                  - 'ecs:DescribeTasks'
+                  - 'ecs:StopTask'
+                Resource: '*'
+                Condition:
+                  ArnEquals:
+                    'ecs:cluster': !GetAtt EcsCluster.Arn
+              - Effect: Allow
+                Action: 'iam:PassRole'
+                Resource:
+                  - !GetAtt AirflowWorkerExecutionRole.Arn
+                  - !GetAtt AirflowWorkerTaskRole.Arn
+        # The triggerer polls Batch job status.
+        - PolicyName: airflow-batch-describe
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'batch:DescribeJobs'
+                Resource: '*'
+        # ECS Exec into the api-server task for the UI port-forward.
+        - PolicyName: airflow-ecs-exec
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssmmessages:CreateControlChannel'
+                  - 'ssmmessages:CreateDataChannel'
+                  - 'ssmmessages:OpenControlChannel'
+                  - 'ssmmessages:OpenDataChannel'
+                Resource: '*'
+
+  # Roles for the Fargate workers.
+  AirflowWorkerExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  AirflowWorkerTaskRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref AirflowS3ManagedPolicy
+      # Workers submit Batch jobs.
+      Policies:
+        - PolicyName: airflow-batch-submit
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'batch:SubmitJob'
+                Resource:
+                  - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-queue/comet-${Env}-batch-*'
+                  - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
+              - Effect: Allow
+                Action:
+                  - 'batch:DescribeJobs'
+                  - 'batch:TerminateJob'
+                Resource: '*'
+        # Read/write the dataset-releases table.
+        - PolicyName: airflow-dynamodb
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:UpdateItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/comet-${Env}-dataset-releases'
+        # Read/write the data bucket.
+        - PolicyName: airflow-data-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 's3:ListBucket'
+                Resource: !Ref DataBucketArn
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:DeleteObject'
+                  - 's3:AbortMultipartUpload'
+                Resource: !Sub '${DataBucketArn}/*'
+        # Read Batch job logs into the Airflow task log.
+        - PolicyName: airflow-batch-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'logs:GetLogEvents'
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/batch/job:log-stream:*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/batch/job:log-stream:*'
+
+  AirflowLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/ecs/airflow'
+      RetentionInDays: 14
+
+  # Runs `airflow db migrate` then exits. Run as a one-off task before the services roll.
+  InitTaskDef:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Sub '${AWS::StackName}-init'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: init
+          Image: !Ref AirflowImage
+          Essential: true
+          Command:
+            - init
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: LocalExecutor
+{{- common_env(api_url) }}
+          Secrets:
+{{- common_secrets() }}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AirflowLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: airflow
+
+  ApiServerTaskDef:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Sub '${AWS::StackName}-api-server'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: api-server
+          Image: !Ref AirflowImage
+          Essential: true
+          Command:
+            - api-server
+          Environment:
+{{- ecs_executor_env() }}
+{{- common_env("http://localhost:8080") }}
+{{- dag_bundle_env(60) }}
+          Secrets:
+{{- common_secrets() }}
+            - Name: ADMIN_PASSWORD
+              ValueFrom: !Ref AdminPasswordSecret
+            - Name: AIRFLOW__API__SECRET_KEY
+              ValueFrom: !Ref ApiSecretKey
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AirflowLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: airflow
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl --fail http://localhost:8080/api/v2/monitor/health
+            Interval: 60
+            Timeout: 20
+            Retries: 5
+            StartPeriod: 60
+
+  SchedulerTaskDef:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Sub '${AWS::StackName}-scheduler'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: scheduler
+          Image: !Ref AirflowImage
+          Essential: true
+          Command:
+            - scheduler
+          Environment:
+{{- ecs_executor_env() }}
+{{- common_env(api_url) }}
+            - Name: AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK
+              Value: 'True'
+{{- dag_bundle_env(60) }}
+          Secrets:
+{{- common_secrets() }}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AirflowLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: airflow
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl --fail http://localhost:8974/health
+            Interval: 60
+            Timeout: 20
+            Retries: 5
+            StartPeriod: 60
+
+  DagProcessorTaskDef:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Sub '${AWS::StackName}-dag-processor'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: dag-processor
+          Image: !Ref AirflowImage
+          Essential: true
+          Command:
+            - dag-processor
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: LocalExecutor
+{{- common_env(api_url) }}
+{{- dag_bundle_env(60) }}
+          Secrets:
+{{- common_secrets() }}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AirflowLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: airflow
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - . /opt/airflow/env.sh && CONNECTION_CHECK_MAX_COUNT=0 AIRFLOW__LOGGING__LOGGING_LEVEL=ERROR airflow jobs check --local --job-type DagProcessorJob
+            Interval: 60
+            Timeout: 20
+            Retries: 5
+            StartPeriod: 60
+
+  TriggererTaskDef:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Sub '${AWS::StackName}-triggerer'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: triggerer
+          Image: !Ref AirflowImage
+          Essential: true
+          Command:
+            - triggerer
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: LocalExecutor
+{{- common_env(api_url) }}
+          Secrets:
+{{- common_secrets() }}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AirflowLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: airflow
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - . /opt/airflow/env.sh && CONNECTION_CHECK_MAX_COUNT=0 AIRFLOW__LOGGING__LOGGING_LEVEL=ERROR airflow jobs check --job-type TriggererJob --local
+            Interval: 60
+            Timeout: 20
+            Retries: 5
+            StartPeriod: 60
+
+  # Private DNS so workers (and the other services) can find the api-server.
+  AirflowPrivateDnsNamespace:
+    Type: 'AWS::ServiceDiscovery::PrivateDnsNamespace'
+    Properties:
+      Name: {{ dns_namespace }}
+      Vpc: !Ref VpcId
+
+  ApiServerServiceDiscovery:
+    Type: 'AWS::ServiceDiscovery::Service'
+    Properties:
+      Name: {{ api_server_name }}
+      NamespaceId: !GetAtt AirflowPrivateDnsNamespace.Id
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  AirflowWorkerLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/ecs/airflow-worker'
+      RetentionInDays: 14
+
+  # CPU/Memory can be overridden per task via executor_config.
+  AirflowWorkerTaskDef:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Sub '${AWS::StackName}-worker'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '1024'
+      Memory: '2048'
+      ExecutionRoleArn: !GetAtt AirflowWorkerExecutionRole.Arn
+      TaskRoleArn: !GetAtt AirflowWorkerTaskRole.Arn
+      ContainerDefinitions:
+        - Name: worker
+          Image: !Ref AirflowImage
+          Essential: true
+          Environment:
+            - Name: AIRFLOW__CORE__EXECUTOR
+              Value: LocalExecutor
+            - Name: AIRFLOW__CORE__LOAD_EXAMPLES
+              Value: 'False'
+            - Name: AIRFLOW__API__BASE_URL
+              Value: '{{ api_url }}'
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AWS::Region
+            # Read by the comet package.
+            - Name: AWS_ENV
+              Value: !Ref Env
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+{{ dag_bundle_env(86400) }}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AirflowWorkerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: airflow
+
+Outputs:
+  EcsClusterName:
+    Value: !Ref EcsCluster
+
+  InitTaskDefArn:
+    Description: One-off task that runs the DB migration
+    Value: !Ref InitTaskDef
+
+  ApiServerTaskDefArn:
+    Value: !Ref ApiServerTaskDef
+
+  SchedulerTaskDefArn:
+    Value: !Ref SchedulerTaskDef
+
+  DagProcessorTaskDefArn:
+    Value: !Ref DagProcessorTaskDef
+
+  TriggererTaskDefArn:
+    Value: !Ref TriggererTaskDef
+
+  ApiServerServiceDiscoveryArn:
+    Value: !GetAtt ApiServerServiceDiscovery.Arn
+
+  AdminPasswordSecretArn:
+    Description: ARN of the Secrets Manager secret with the Airflow admin password
+    Value: !Ref AdminPasswordSecret
+
+  AirflowWorkerTaskDefArn:
+    Description: ARN of the default Fargate worker task definition
+    Value: !Ref AirflowWorkerTaskDef
+
+  AirflowWorkerExecutionRoleArn:
+    Description: Execution role used by Fargate workers
+    Value: !GetAtt AirflowWorkerExecutionRole.Arn
+
+  AirflowWorkerTaskRoleArn:
+    Description: Task role used by Fargate workers
+    Value: !GetAtt AirflowWorkerTaskRole.Arn

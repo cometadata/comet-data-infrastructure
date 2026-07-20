@@ -1,0 +1,14 @@
+template:
+  path: rds.j2
+  type: file
+
+dependencies:
+  - dev/security-groups.yaml
+  - dev/network.yaml
+
+parameters:
+  # AZ-a private subnet (instance lives here) plus AZ-b placeholder for the two-AZ requirement.
+  SubnetIds:
+    - !stack_output dev/network.yaml::PrivateSubnetAId
+    - !stack_output dev/network.yaml::PrivateSubnetBId
+  RdsSecurityGroupId: !stack_output dev/security-groups.yaml::RdsSecurityGroupId

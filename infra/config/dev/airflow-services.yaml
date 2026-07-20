@@ -1,0 +1,32 @@
+template:
+  path: airflow-services.j2
+  type: file
+
+dependencies:
+  - dev/airflow.yaml
+  - dev/security-groups.yaml
+  - dev/network.yaml
+  - dev/endpoints.yaml
+
+# Run the DB migration as a one-off Fargate task before the services start. The init task
+# definition comes from the airflow stack, which is launched first as a dependency. !sub resolves
+# the stack outputs at hook time and builds the command.
+hooks:
+  before_launch:
+    - !cmd
+        run: !sub
+          - "bash infra/scripts/airflow-init.sh {cluster} {taskdef} {subnet} {sg}"
+          - cluster: !stack_output dev/airflow.yaml::EcsClusterName
+            taskdef: !stack_output dev/airflow.yaml::InitTaskDefArn
+            subnet: !stack_output dev/network.yaml::PrivateSubnetAId
+            sg: !stack_output dev/security-groups.yaml::ServicesSecurityGroupId
+
+parameters:
+  ClusterName: !stack_output dev/airflow.yaml::EcsClusterName
+  SubnetId: !stack_output dev/network.yaml::PrivateSubnetAId
+  ServicesSecurityGroupId: !stack_output dev/security-groups.yaml::ServicesSecurityGroupId
+  ApiServerTaskDefArn: !stack_output dev/airflow.yaml::ApiServerTaskDefArn
+  SchedulerTaskDefArn: !stack_output dev/airflow.yaml::SchedulerTaskDefArn
+  DagProcessorTaskDefArn: !stack_output dev/airflow.yaml::DagProcessorTaskDefArn
+  TriggererTaskDefArn: !stack_output dev/airflow.yaml::TriggererTaskDefArn
+  ApiServerServiceDiscoveryArn: !stack_output dev/airflow.yaml::ApiServerServiceDiscoveryArn

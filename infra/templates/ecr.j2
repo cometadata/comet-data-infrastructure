@@ -1,0 +1,81 @@
+{#- Expire all but the newest `latest`-tagged image and all but the newest
+    `untagged_keep` untagged images (policy JSON in includes/). #}
+{%- macro lifecycle_policy(untagged_keep) %}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+{% filter indent(10, true) %}{% include 'includes/ecr-lifecycle-policy.json.j2' %}{% endfilter %}
+{%- endmacro -%}
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Elastic container registry: COMET image repos'
+
+Parameters:
+  RepositoryName:
+    Type: String
+
+Resources:
+  Repository:
+    Type: 'AWS::ECR::Repository'
+    DeletionPolicy: 'Retain'
+    Properties:
+      RepositoryName: !Ref RepositoryName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+{{- lifecycle_policy(3) }}
+
+  BatchRepository:
+    Type: 'AWS::ECR::Repository'
+    DeletionPolicy: 'Retain'
+    Properties:
+      RepositoryName: !Sub '${RepositoryName}-batch'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+{{- lifecycle_policy(3) }}
+
+  MarpleRepository:
+    Type: 'AWS::ECR::Repository'
+    DeletionPolicy: 'Retain'
+    Properties:
+      RepositoryName: !Sub '${RepositoryName}-marple'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+{{- lifecycle_policy(3) }}
+
+  # Keep more untagged images: re-pushing untags the digest the airflow task def still pins.
+  AirflowRepository:
+    Type: 'AWS::ECR::Repository'
+    DeletionPolicy: 'Retain'
+    Properties:
+      RepositoryName: !Sub '${RepositoryName}-airflow'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+{{- lifecycle_policy(10) }}
+
+Outputs:
+  RepositoryName:
+    Value: !Ref Repository
+  RepositoryArn:
+    Value: !GetAtt Repository.Arn
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+
+  BatchRepositoryName:
+    Value: !Ref BatchRepository
+  BatchRepositoryArn:
+    Value: !GetAtt BatchRepository.Arn
+  BatchRepositoryUri:
+    Value: !GetAtt BatchRepository.RepositoryUri
+
+  MarpleRepositoryName:
+    Value: !Ref MarpleRepository
+  MarpleRepositoryArn:
+    Value: !GetAtt MarpleRepository.Arn
+  MarpleRepositoryUri:
+    Value: !GetAtt MarpleRepository.RepositoryUri
+
+  AirflowRepositoryName:
+    Value: !Ref AirflowRepository
+  AirflowRepositoryArn:
+    Value: !GetAtt AirflowRepository.Arn
+  AirflowRepositoryUri:
+    Value: !GetAtt AirflowRepository.RepositoryUri

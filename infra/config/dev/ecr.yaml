@@ -1,0 +1,6 @@
+template:
+  path: ecr.j2
+  type: file
+
+parameters:
+  RepositoryName: comet-dev

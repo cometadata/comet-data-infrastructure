@@ -1,0 +1,37 @@
+# COMET Airflow image: slim apache/airflow + amazon provider + comet package.
+
+ARG AIRFLOW_VERSION
+ARG PYTHON_VERSION
+ARG S5CMD_VERSION="2.3.0"
+
+FROM apache/airflow:slim-${AIRFLOW_VERSION}-python${PYTHON_VERSION}
+
+# Re-declare ARGs that go out of scope after FROM.
+ARG AIRFLOW_VERSION
+ARG PYTHON_VERSION
+ARG S5CMD_VERSION
+ARG CONSTRAINTS_URL=https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt
+
+# Install Airflow with the providers and DB drivers we use, pinned to the official constraints.
+RUN pip install --no-cache-dir \
+      "apache-airflow[amazon,postgres,standard,fab]==${AIRFLOW_VERSION}" \
+      "apache-airflow-providers-amazon[aiobotocore]" \
+      --constraint "${CONSTRAINTS_URL}"
+
+USER root
+COPY --chown=airflow:0 pyproject.toml /opt/comet/pyproject.toml
+COPY --chown=airflow:0 src /opt/comet/src
+# comet uses /data as its working dir.
+RUN mkdir -p /data && chown airflow:0 /data
+# comet shells out to s5cmd to copy files to and from S3.
+RUN curl -fsSL "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz" \
+      | tar -xz -C /usr/local/bin s5cmd \
+    && chmod +x /usr/local/bin/s5cmd
+USER airflow
+# Install comet with the same constraints.
+RUN pip install --no-cache-dir /opt/comet --constraint "${CONSTRAINTS_URL}"
+
+# Entrypoint derives env and dispatches by role.
+COPY --chown=airflow:0 docker/airflow-entrypoint.sh /opt/comet/bin/airflow-entrypoint.sh
+RUN chmod +x /opt/comet/bin/airflow-entrypoint.sh
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/opt/comet/bin/airflow-entrypoint.sh"]

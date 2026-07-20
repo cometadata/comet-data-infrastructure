@@ -8,18 +8,20 @@ import pyarrow.parquet as pq
 
 from comet.arxiv.manifest import parse_manifest
 
-ARXIV_MANIFEST_SCHEMA = pa.schema([
-    ("content_md5sum", pa.string()),
-    ("filename", pa.string()),
-    ("first_item", pa.string()),
-    ("last_item", pa.string()),
-    ("md5sum", pa.string()),
-    ("num_items", pa.int64()),
-    ("seq_num", pa.int64()),
-    ("size", pa.int64()),
-    ("timestamp", pa.timestamp("us")),
-    ("yymm", pa.string()),
-])
+ARXIV_MANIFEST_SCHEMA = pa.schema(
+    [
+        ("content_md5sum", pa.string()),
+        ("filename", pa.string()),
+        ("first_item", pa.string()),
+        ("last_item", pa.string()),
+        ("md5sum", pa.string()),
+        ("num_items", pa.int64()),
+        ("seq_num", pa.int64()),
+        ("size", pa.int64()),
+        ("timestamp", pa.timestamp("us")),
+        ("yymm", pa.string()),
+    ]
+)
 
 
 def convert_arxiv_manifest(input_file: Path, output_dir: Path) -> Path:

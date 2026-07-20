@@ -1,0 +1,13 @@
+dags:
+  - dag_id: alpha
+    factory: comet.airflow.tests.fixtures.factories.fake_factory
+    params:
+      start_date: 2026-01-01
+      foo: hello
+
+  - dag_id: beta
+    factory: comet.airflow.tests.fixtures.factories.fake_factory
+    enabled: false
+    params:
+      start_date: 2026-01-01
+      foo: skipped

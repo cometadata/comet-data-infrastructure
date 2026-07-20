@@ -1,5 +1,5 @@
 # ----------------------------------
-# Comet Docker Image
+# COMET Docker Image
 # Two-stage build: compile arxiv-tex-extract, then copy to lightweight runtime
 # ----------------------------------
 

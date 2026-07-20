@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'PostgreSQL metadata database for Airflow'
+
+Parameters:
+  SubnetIds:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+
+  RdsSecurityGroupId:
+    Type: String
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+
+  EngineVersion:
+    Type: String
+    Default: '17'
+
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+
+  StorageType:
+    Type: String
+    Default: gp3
+
+  BackupRetentionPeriod:
+    Type: Number
+    Default: 7
+
+  MultiAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  PubliclyAccessible:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  StorageEncrypted:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+Resources:
+  DbSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Sub '${AWS::StackName} airflow metadata DB subnets'
+      SubnetIds: !Ref SubnetIds
+
+  DbCredentialsSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '${AWS::StackName}-db-credentials'
+      Description: !Sub 'Airflow metadata DB credentials for ${AWS::StackName}'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"airflow"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\ '
+
+  DbInstance:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-airflow'
+      Engine: postgres
+      EngineVersion: !Ref EngineVersion
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      MaxAllocatedStorage: 100
+      StorageType: !Ref StorageType
+      StorageEncrypted: !Ref StorageEncrypted
+      MasterUsername: !Sub '{% raw %}{{resolve:secretsmanager:${DbCredentialsSecret}:SecretString:username}}{% endraw %}'
+      MasterUserPassword: !Sub '{% raw %}{{resolve:secretsmanager:${DbCredentialsSecret}:SecretString:password}}{% endraw %}'
+      DBName: airflow
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      # Pin the instance to AZ a, with the services.
+      AvailabilityZone: !Sub '${AWS::Region}a'
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroupId
+      PubliclyAccessible: !Ref PubliclyAccessible
+      MultiAZ: !Ref MultiAZ
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      DeletionProtection: true
+      DeleteAutomatedBackups: false
+
+  DbSecretAttachment:
+    Type: 'AWS::SecretsManager::SecretTargetAttachment'
+    Properties:
+      SecretId: !Ref DbCredentialsSecret
+      TargetId: !Ref DbInstance
+      TargetType: 'AWS::RDS::DBInstance'
+
+Outputs:
+  DbCredentialsSecretArn:
+    Description: ARN of the Secrets Manager secret holding DB credentials (host/port/dbname injected via target attachment)
+    Value: !Ref DbCredentialsSecret
+
+  DbEndpointAddress:
+    Value: !GetAtt DbInstance.Endpoint.Address
+
+  DbEndpointPort:
+    Value: !GetAtt DbInstance.Endpoint.Port

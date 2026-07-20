@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Private subnets for the Airflow services and RDS'
+
+Parameters:
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+
+  PrivateSubnetACidr:
+    Type: String
+    Description: 'CIDR for the AZ-a private subnet (Airflow services and the RDS instance)'
+
+  PrivateSubnetBCidr:
+    Type: String
+    Description: 'CIDR for the AZ-b private subnet (RDS subnet-group placeholder only)'
+
+Resources:
+  # AZ a is where Airflow and RDS live
+  PrivateSubnetA:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref PrivateSubnetACidr
+      AvailabilityZone: !Sub '${AWS::Region}a'
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-a'
+
+  # AZ b exists only so the RDS subnet group spans two AZs, nothing runs here.
+  PrivateSubnetB:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref PrivateSubnetBCidr
+      AvailabilityZone: !Sub '${AWS::Region}b'
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private-b'
+
+  # No default route. The endpoints stack associates the S3 gateway endpoint with this table.
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-private'
+
+  PrivateSubnetARouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+Outputs:
+  PrivateSubnetAId:
+    Description: 'AZ-a private subnet (Airflow services and the RDS instance)'
+    Value: !Ref PrivateSubnetA
+
+  PrivateSubnetBId:
+    Description: 'AZ-b private subnet (RDS subnet-group placeholder)'
+    Value: !Ref PrivateSubnetB
+
+  PrivateRouteTableId:
+    Description: 'Route table for the private subnets'
+    Value: !Ref PrivateRouteTable

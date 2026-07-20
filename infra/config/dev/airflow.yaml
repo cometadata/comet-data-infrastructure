@@ -1,0 +1,27 @@
+template:
+  path: airflow.j2
+  type: file
+
+dependencies:
+  - dev/security-groups.yaml
+  - dev/s3.yaml
+  - dev/rds.yaml
+  - dev/ecr.yaml
+
+parameters:
+  Env: "{{ var.env }}"
+  VpcId: !stack_attr sceptre_user_data.vpc_id
+  # Workers launch into the public subnet (they need public IPs to download external data).
+  WorkerSubnetId: !stack_attr sceptre_user_data.public_subnet
+  JobsSecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
+  # Image URI pinned by digest so the task definitions change on every push.
+  # Written by make push-airflow-dev.
+  AirflowImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/AirflowEcrImageUri
+  DagsBucketName: !stack_output dev/s3.yaml::AirflowDagsBucketName
+  DagsBucketArn: !stack_output dev/s3.yaml::AirflowDagsBucketARN
+  LogsBucketName: !stack_output dev/s3.yaml::AirflowLogsBucketName
+  LogsBucketArn: !stack_output dev/s3.yaml::AirflowLogsBucketARN
+  DataBucketArn: !stack_output dev/s3.yaml::S3BucketARN
+  DbCredentialsSecretArn: !stack_output dev/rds.yaml::DbCredentialsSecretArn
+  # Created outside CloudFormation; see docs/airflow.md.
+  FernetSecretArn: "{{ var.fernet_secret_arn }}"

@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Apache Airflow services: api-server, scheduler, dag-processor, triggerer.'
+
+Parameters:
+  ClusterName:
+    Type: String
+
+  SubnetId:
+    Type: 'AWS::EC2::Subnet::Id'
+
+  ServicesSecurityGroupId:
+    Type: String
+
+  ApiServerTaskDefArn:
+    Type: String
+
+  SchedulerTaskDefArn:
+    Type: String
+
+  DagProcessorTaskDefArn:
+    Type: String
+
+  TriggererTaskDefArn:
+    Type: String
+
+  ApiServerServiceDiscoveryArn:
+    Type: String
+
+Resources:
+  # Single task per service, so a deploy briefly drops to zero before the new task starts.
+  # Only the api-server needs discovery + ECS Exec — it's the one workers reach.
+  ApiServerService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub '${AWS::StackName}-api-server'
+      Cluster: !Ref ClusterName
+      LaunchType: FARGATE
+      PropagateTags: SERVICE
+      TaskDefinition: !Ref ApiServerTaskDefArn
+      DesiredCount: 1
+      EnableExecuteCommand: true
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref SubnetId
+          SecurityGroups:
+            - !Ref ServicesSecurityGroupId
+          AssignPublicIp: DISABLED
+      ServiceRegistries:
+        - RegistryArn: !Ref ApiServerServiceDiscoveryArn
+          ContainerName: api-server
+
+  SchedulerService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub '${AWS::StackName}-scheduler'
+      Cluster: !Ref ClusterName
+      LaunchType: FARGATE
+      PropagateTags: SERVICE
+      TaskDefinition: !Ref SchedulerTaskDefArn
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref SubnetId
+          SecurityGroups:
+            - !Ref ServicesSecurityGroupId
+          AssignPublicIp: DISABLED
+
+  DagProcessorService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub '${AWS::StackName}-dag-processor'
+      Cluster: !Ref ClusterName
+      LaunchType: FARGATE
+      PropagateTags: SERVICE
+      TaskDefinition: !Ref DagProcessorTaskDefArn
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref SubnetId
+          SecurityGroups:
+            - !Ref ServicesSecurityGroupId
+          AssignPublicIp: DISABLED
+
+  TriggererService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub '${AWS::StackName}-triggerer'
+      Cluster: !Ref ClusterName
+      LaunchType: FARGATE
+      PropagateTags: SERVICE
+      TaskDefinition: !Ref TriggererTaskDefArn
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref SubnetId
+          SecurityGroups:
+            - !Ref ServicesSecurityGroupId
+          AssignPublicIp: DISABLED

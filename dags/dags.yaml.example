@@ -1,0 +1,41 @@
+# Copy to dags.yaml
+# One entry is defined for each DAG instance.
+# The bucket name needs to be set for each DAG.
+
+dags:
+  - dag_id: ror_ingest
+    factory: comet.dags.ror_ingest.create_ror_ingest_dag
+    params:
+      start_date: 2026-01-01
+      tags: [ror, ingest]
+      bucket_name: <your-s3-bucket>
+
+  - dag_id: datacite_ingest
+    factory: comet.dags.datacite_ingest.create_datacite_ingest_dag
+    params:
+      start_date: 2026-01-01
+      tags: [datacite, ingest]
+      bucket_name: <your-s3-bucket>
+      datacite_bucket_name: monthly-datafile.datacite.org
+      datacite_bucket_region: eu-west-1
+
+  - dag_id: datacite_enrich_resource_type_general
+    factory: comet.dags.datacite_enrich_resource_type_general.create_datacite_enrich_resource_type_general_dag
+    params:
+      start_date: 2026-01-01
+      tags: [datacite, enrich]
+      bucket_name: <your-s3-bucket>
+
+  - dag_id: datacite_enrich_funders
+    factory: comet.dags.datacite_enrich_funders.create_datacite_enrich_funders_dag
+    params:
+      start_date: 2026-01-01
+      tags: [datacite, enrich]
+      bucket_name: <your-s3-bucket>
+
+  - dag_id: datacite_enrich_affiliations
+    factory: comet.dags.datacite_enrich_affiliations.create_datacite_enrich_affiliations_dag
+    params:
+      start_date: 2026-01-01
+      tags: [datacite, enrich]
+      bucket_name: <your-s3-bucket>

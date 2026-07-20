@@ -12,11 +12,23 @@ dependencies = [
     "cyclopts>=4,<5",
     "python-magic>=0.4,<1",
     "tqdm>=4,<5",
+    "pendulum>=3.2.0",
+    "pynamodb>=6.1.0",
+    "pooch>=1.9.0",
+    "pydantic>=2,<3",
+    "pyyaml>=6,<7",
 ]
 
 [project.optional-dependencies]
 dev = [
+    # vcrpy's aiohttp stub subclasses aiohttp.streams.AsyncStreamReaderMixin, which
+    # aiohttp 3.14 removed; pin below 3.14 (airflow's http provider needs >=3.12.14).
+    "aiohttp>=3.12.14,<3.14",
+    "moto>=5.2.1",
     "pytest>=8,<10",
+    "pytest-mock>=3,<4",
+    "ruff>=0.9",
+    "vcrpy>=8.1.1",
 ]
 infra = [
     "sceptre>=4,<5",
@@ -27,18 +39,72 @@ notebooks = [
     "jupysql>=0.11.1,<1",
     "duckdb_engine>=0.17.0,<1",
 ]
-docling = [
-    "docling>=2,<3",
-]
 
 [tool.uv]
 conflicts = [
     [
         { extra = "infra" },
         { extra = "notebooks" },
-        { extra = "docling" },
     ],
 ]
 
 [project.scripts]
 comet = "comet.cli:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "ARG", # flake8-unused-arguments: Detects unused function arguments.
+    "B", # flake8-bugbear: Finds likely bugs and design problems in Python code.
+    "C4", # flake8-comprehensions: Suggests more idiomatic and efficient comprehensions.
+    "D", # pydocstyle: Enforces conventions for Python docstrings.
+    "E", # pycodestyle (errors): Detects PEP 8 style errors.
+    "F", # Pyflakes: Detects unused imports, undefined names, and other logical issues.
+    "I", # isort: Ensures imports are correctly sorted and grouped.
+    "N", # pep8-naming: Enforces naming conventions for variables, functions, classes, and constants.
+    "PERF", # Perflint: Identifies performance anti-patterns and suggests faster alternatives.
+    "PL", # Pylint: Comprehensive checks for code quality, refactoring, and logical errors.
+    "Q", # flake8-quotes: Enforces consistent quote style for strings.
+    "RET", # flake8-return: Improves consistency of return statements.
+    "RUF", # Ruff-specific rules: Additional lint rules implemented directly in Ruff.
+    "S", # flake8-bandit: Detects common security issues and potential vulnerabilities.
+    "SIM", # flake8-simplify: Suggests code simplifications and more idiomatic constructs.
+    "UP", # pyupgrade: Rewrites code to use modern Python syntax and features.
+    "PTH", # flake8-use-pathlib: Encourages use of pathlib instead of os.path and open().
+    "TCH", # flake8-type-checking: Ensures imports used only for typing are placed inside TYPE_CHECKING blocks.
+    "TRY", # tryceratops: Improves exception handling patterns and logging in try/except blocks.
+]
+ignore = [
+    "D100", # Missing docstring in public module
+    "D104", # Missing docstring in public package
+    "E501", # Line too long
+    "PLR0911", # Too many return statements
+    "PLR0912", # Too many branches
+    "PLR0913", # Too many arguments
+    "PLR0915", # Too many statements
+    "PLW0603", # Using the global statement,
+    "TRY003", # tryceratops: Avoid long or complex exception messages defined directly in raise statements
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/cli.py" = ["PLC0415"]
+"**/tests/**" = ["ALL"] # skip all lint rules in tests; `ruff format` still formats them
+"src/comet/arxiv/benchmark.py" = ["ALL"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "double"
+multiline-quotes = "double"
+docstring-quotes = "double"
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+combine-as-imports = true

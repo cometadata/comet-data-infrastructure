@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'S3 storage for COMET'
+
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-data'
+      # Removing this makes CloudFormation call PutBucketAcl, which fails because the bucket has ACLs disabled.
+      # Can be removed on a new deploy
+      AccessControl: 'Private'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'ICMU'
+            Status: 'Enabled'
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 5
+
+  AirflowDagsBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-airflow-dags'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+          - Id: ICMU
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 5
+
+  AirflowLogsBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-airflow-logs'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireLogs
+            Status: Enabled
+            ExpirationInDays: 30
+          - Id: ICMU
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 5
+
+Outputs:
+  S3BucketID:
+    Value: !Ref S3Bucket
+
+  S3BucketURI:
+    Value: !Sub "s3://${S3Bucket}"
+
+  S3BucketARN:
+    Value: !GetAtt S3Bucket.Arn
+
+  AirflowDagsBucketName:
+    Value: !Ref AirflowDagsBucket
+
+  AirflowDagsBucketARN:
+    Value: !GetAtt AirflowDagsBucket.Arn
+
+  AirflowLogsBucketName:
+    Value: !Ref AirflowLogsBucket
+
+  AirflowLogsBucketARN:
+    Value: !GetAtt AirflowLogsBucket.Arn

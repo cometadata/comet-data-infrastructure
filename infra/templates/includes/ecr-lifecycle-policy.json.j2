@@ -1,0 +1,31 @@
+{
+  "rules": [
+    {
+      "action": {
+        "type": "expire"
+      },
+      "selection": {
+        "countType": "imageCountMoreThan",
+        "countNumber": 1,
+        "tagStatus": "tagged",
+        "tagPrefixList": [
+          "latest"
+        ]
+      },
+      "description": "Ensure that we do not have more than 1 tagged version",
+      "rulePriority": 1
+    },
+    {
+      "action": {
+        "type": "expire"
+      },
+      "selection": {
+        "countType": "imageCountMoreThan",
+        "countNumber": {{ untagged_keep }},
+        "tagStatus": "untagged"
+      },
+      "description": "Only retain the last {{ untagged_keep }} untagged versions",
+      "rulePriority": 2
+    }
+  ]
+}
