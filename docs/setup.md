@@ -6,18 +6,11 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/),
 then:
 
 ```bash
+make install
 make install-infra
 ```
 
-### Local Airflow install
-
-Airflow is deliberately not in `pyproject.toml`. To import `airflow.*` modules locally:
-
-```bash
-make install-airflow
-```
-
-`uv sync` removes it again (Airflow isn't in the lock file); re-run `make install-airflow` afterwards, or use `uv sync --inexact`.
+These commands create the root and infrastructure environments from `uv.lock` and `infra/uv.lock`, respectively.
 
 ## Environment variables
 
@@ -52,7 +45,7 @@ make deploy-dev
 
 ### Airflow image
 
-The Airflow services and Fargate workers run a custom image that extends `apache/airflow:slim` with the amazon provider and the comet package. `airflow_version` and `python_version` live in `vars-dev.yaml`; both the Makefile and Sceptre read them.
+Airflow services and Fargate workers use a custom `apache/airflow:slim` image with Comet and the Amazon provider installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
 
 ```bash
 make build-airflow         # build comet-airflow:<version> and :latest
@@ -60,16 +53,18 @@ make push-airflow-dev      # push to ECR and record the image digest in SSM
 make deploy-airflow-dev    # build, push, and roll the services
 ```
 
-`push-airflow-dev` writes the pushed image's sha256 digest URI to SSM, and the airflow stack resolves it with `!ssm`. The digest changes with the image content, so the task definition changes and ECS rolls the services; re-pushing the same tag alone would not redeploy. `ssm_prefix` in `vars-dev.yaml` and the `SSM_PREFIX` environment variable must match, and the parameter must exist before the first `sceptre launch dev/airflow-services.yaml` (`make deploy-airflow-dev` and `make deploy-dev` push first, so they self-bootstrap).
+`push-airflow-dev` stores the image's sha256 digest URI in SSM. The Airflow stack reads this value, so a new digest updates the task definition and rolls the services. Set `SSM_PREFIX` to the same value as `ssm_prefix` in `vars-dev.yaml`. `make deploy-airflow-dev` and `make deploy-dev` create the parameter before launching the stack.
 
-To bump the Airflow version:
+To bump the Airflow version, edit `AIRFLOW_VERSION` in `versions.env`, then:
 
 ```bash
-# 1. Edit vars-dev.yaml: airflow_version: x.y.z
-make install-airflow
-uv run pytest
-make deploy-airflow-dev
+make bump-airflow
+uv run --locked --extra airflow --extra dev pytest
 ```
+
+Then commit `versions.env`, `pyproject.toml`, and `uv.lock` together, and run `make deploy-airflow-dev`.
+
+`make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or extras, edit the target before running it.
 
 ### Enrichment configuration
 
@@ -103,12 +98,12 @@ Airflow stores the connection in its metadata database and encrypts it with the 
 
 ### Manual sceptre commands
 
-For per-stack operations not covered by the Makefile:
+For commands not exposed by the Makefile, use the infra project:
 
 ```bash
-uv run sceptre --var-file=vars-dev.yaml status dev
-uv run sceptre --var-file=vars-dev.yaml launch dev/ec2.yaml
-uv run sceptre --var-file=vars-dev.yaml delete dev/ec2.yaml
+uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml status dev
+uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev/ec2.yaml
+uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml delete dev/ec2.yaml
 ```
 
 ### Templates

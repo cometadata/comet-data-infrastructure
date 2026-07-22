@@ -32,3 +32,7 @@ ignore_ec2: false
 #   aws secretsmanager create-secret --name comet-dev-batch-datacite-credentials \
 #     --secret-string '{"account_id":"<id>","password":"<password>"}'
 datacite_credentials_secret_arn: ''
+
+# ARN of the Airflow Fernet key secret. CloudFormation does not manage this secret;
+# see "Rotating the Fernet key" in docs/setup.md.
+fernet_secret_arn: ''

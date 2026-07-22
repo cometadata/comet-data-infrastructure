@@ -3,10 +3,8 @@
 # Two-stage build: compile arxiv-tex-extract, then copy to lightweight runtime
 # ----------------------------------
 
-ARG PYTHON_VERSION="3.12"
-ARG S5CMD_VERSION="2.3.0"
-ARG DUCKDB_VERSION="1.2.2"
-ARG RUST_TARGET_CPU="x86-64-v3"
+ARG UV_VERSION
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
 # ----------------------------------
 # Stage 1: Build arxiv-tex-extract
@@ -38,7 +36,10 @@ ENV DUCKDB_VERSION=${DUCKDB_VERSION}
 ENV PYTHON_VERSION=${PYTHON_VERSION}
 
 # Pull uv into image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
+
+# Cache and site-packages are on separate filesystems; copy instead of hardlinking.
+ENV UV_LINK_MODE=copy
 
 RUN dnf install -y \
     aws-cli \
@@ -75,10 +76,12 @@ COPY --from=builder /arxiv-tex-extract/target/release/latex-extract /usr/local/b
 
 # Sync Python dependencies
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev --python ${PYTHON_VERSION}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --no-dev --python ${PYTHON_VERSION}
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Install comet package
 COPY src/ src/
-RUN uv sync --frozen --no-dev --python ${PYTHON_VERSION}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --python ${PYTHON_VERSION}
