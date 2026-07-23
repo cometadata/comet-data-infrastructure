@@ -512,7 +512,7 @@ Resources:
       RequiresCompatibilities:
         - FARGATE
       Cpu: '256'
-      Memory: '512'
+      Memory: '1024'
       ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt EcsTaskRole.Arn
       ContainerDefinitions:
