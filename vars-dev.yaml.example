@@ -23,8 +23,12 @@ public_subnet_a_stack_output: ''
 private_subnet_a_cidr: '10.0.0.0/24'
 private_subnet_b_cidr: '10.0.1.0/24'
 
-# Set to true to skip deploying the dev EC2 instance (config/dev/ec2.yaml)
-ignore_ec2: false
+# Dev instance type: needs NVMe instance storage for /data
+instance_type: c5ad.large
+
+# Hour of day (0-23) and IANA time zone for the dev instance's nightly auto-shutdown
+instance_shutdown_hour: 22
+instance_shutdown_timezone: America/Los_Angeles
 
 # Secrets Manager ARN holding DataCite credentials, consumed by the
 # download-datacite AWS Batch job (config/dev/batch-jobs.yaml). Create the secret
