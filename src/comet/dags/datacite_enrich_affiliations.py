@@ -19,14 +19,14 @@ import comet.dynamodb_store as dataset_releases
 from comet.model.dataset_version_model import DatasetRelease
 from comet.utils import get_env
 
-OPENSEARCH_VCPU = "6"
-OPENSEARCH_MEMORY = "4096"
-OPENSEARCH_JAVA_OPTS = "-Xms2g -Xmx2g"
-MARPLE_VCPU = "20"
-MARPLE_MEMORY = "28672"
-MARPLE_WORKERS = "20"
-MAIN_VCPU = "5"
-MAIN_MEMORY = "28672"
+OPENSEARCH_VCPU = "10"
+OPENSEARCH_MEMORY = "6144"
+OPENSEARCH_JAVA_OPTS = "-Xms3g -Xmx3g"
+MARPLE_VCPU = "10"
+MARPLE_MEMORY = "27648"
+MARPLE_WORKERS = "10"
+MAIN_VCPU = "10"
+MAIN_MEMORY = "27648"
 WRITER_LANES = "32"
 
 BATCH_ATTEMPT_TIMEOUT = 4 * 60 * 60

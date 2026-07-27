@@ -1,8 +1,11 @@
+ARG UV_VERSION
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 FROM amazonlinux:2023
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION
 
 # Pull uv into the image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 RUN dnf install -y git tar gzip python${PYTHON_VERSION} && dnf clean all
 
@@ -14,8 +17,8 @@ COPY docker/marple-entrypoint.sh /usr/local/bin/marple-entrypoint
 RUN chmod +x /usr/local/bin/marple-entrypoint
 
 WORKDIR /code
-ARG MARPLE_REPO=https://gitlab.com/jdiprose/marple.git
-ARG MARPLE_REF=feature/comet-marple-enhancements
+ARG MARPLE_REPO
+ARG MARPLE_REF
 # Bump CACHEBUST to force a fresh clone
 ARG CACHEBUST=1
 RUN git clone --branch "${MARPLE_REF}" --depth 1 "${MARPLE_REPO}" /code

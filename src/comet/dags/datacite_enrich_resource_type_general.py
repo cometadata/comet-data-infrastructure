@@ -20,7 +20,7 @@ from comet.utils import get_env
 
 ENRICH_VCPU = "8"
 ENRICH_MEMORY = "15360"
-WRITER_LANES = "1"
+WRITER_LANES = "4"
 
 BATCH_ATTEMPT_TIMEOUT = 3 * 60 * 60
 
