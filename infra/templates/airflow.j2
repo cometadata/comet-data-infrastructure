@@ -56,6 +56,9 @@
               Value: !Ref JobsSecurityGroupId
             - Name: AIRFLOW__AWS_ECS_EXECUTOR__SUBNETS
               Value: !Ref WorkerSubnetId
+            # Tells ECS to copy the tags from the task definition (AirflowWorkerTaskDef) into each running task it launches
+            - Name: AIRFLOW__AWS_ECS_EXECUTOR__RUN_TASK_KWARGS
+              Value: '{"propagateTags":"TASK_DEFINITION"}'
 {%- endmacro %}
 {#- Airflow + AWS env shared by every service container. #}
 {%- macro common_env(api_base_url) %}
@@ -229,6 +232,13 @@ Resources:
                 Condition:
                   ArnEquals:
                     'ecs:cluster': !GetAtt EcsCluster.Arn
+              # So that the Airflow scheduler can tag the worker tasks that it launches
+              - Effect: Allow
+                Action: 'ecs:TagResource'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'ecs:CreateAction': RunTask
               - Effect: Allow
                 Action:
                   - 'ecs:DescribeTasks'
@@ -580,6 +590,12 @@ Resources:
       Memory: '2048'
       ExecutionRoleArn: !GetAtt AirflowWorkerExecutionRole.Arn
       TaskRoleArn: !GetAtt AirflowWorkerTaskRole.Arn
+      # Tags do not automatically propagate to task definitions
+      Tags:
+{% for key, value in sceptre_user_data.stack_tags.items() %}
+        - Key: '{{ key }}'
+          Value: '{{ value }}'
+{% endfor %}
       ContainerDefinitions:
         - Name: worker
           Image: !Ref AirflowImage
@@ -609,6 +625,12 @@ Resources:
 Outputs:
   EcsClusterName:
     Value: !Ref EcsCluster
+
+  AirflowLogGroupName:
+    Value: !Ref AirflowLogGroup
+
+  AirflowWorkerLogGroupName:
+    Value: !Ref AirflowWorkerLogGroup
 
   InitTaskDefArn:
     Description: One-off task that runs the DB migration

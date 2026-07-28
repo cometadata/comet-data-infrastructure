@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'COMET resource alarms'
+
+Parameters:
+  AlertTopicArn:
+    Type: String
+
+  DbInstanceIdentifier:
+    Type: String
+
+  DataBucketName:
+    Type: String
+
+  DagsBucketName:
+    Type: String
+
+  LogsBucketName:
+    Type: String
+
+  LogIngestionBytesPer5MinThreshold:
+    Type: Number
+
+  S3TotalBytesThreshold:
+    Type: Number
+
+Resources:
+  # Alarm if COMET log ingestion exceeds the per-five-minute byte
+  # threshold in at least two of the last four periods.
+  LogIngestionAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-log-ingestion'
+      AlarmDescription: 'COMET log ingestion exceeded the 5-minute threshold'
+      EvaluationPeriods: 4
+      DatapointsToAlarm: 2
+      Threshold: !Ref LogIngestionBytesPer5MinThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+      Metrics:
+        - Id: total
+          Expression: SELECT SUM(IncomingBytes) FROM SCHEMA("AWS/Logs", LogGroupName) WHERE tag.Service = '{{ sceptre_user_data.stack_tags.Service }}' AND tag.Environment = '{{ sceptre_user_data.stack_tags.Environment }}'
+          Label: TotalIncomingBytes
+          Period: 300
+          ReturnData: true
+
+  # Alarm if the combined size of all COMET S3 buckets exceeds the threshold.
+  S3TotalStorageAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-s3-total-storage'
+      AlarmDescription: 'COMET S3 storage exceeded the threshold'
+      EvaluationPeriods: 1
+      Threshold: !Ref S3TotalBytesThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+      Metrics:
+        - Id: total
+          Expression: 'data + dags + logs'
+          Label: TotalStandardStorageBytes
+          ReturnData: true
+{% for metric_id, parameter in [
+  ('data', 'DataBucketName'),
+  ('dags', 'DagsBucketName'),
+  ('logs', 'LogsBucketName'),
+] %}
+        - Id: {{ metric_id }}
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/S3
+              MetricName: BucketSizeBytes
+              Dimensions:
+                - Name: BucketName
+                  Value: !Ref {{ parameter }}
+                - Name: StorageType
+                  Value: StandardStorage
+            Period: 86400
+            Stat: Average
+{% endfor %}
+
+  # Notify SNS alert topic when RDS instance generates a 'low storage'
+  # or 'configuration change' event.
+  RdsEventSubscription:
+    Type: 'AWS::RDS::EventSubscription'
+    Properties:
+      SnsTopicArn: !Ref AlertTopicArn
+      SourceType: db-instance
+      SourceIds: [ !Ref DbInstanceIdentifier ]
+      EventCategories:
+        - low storage
+        - configuration change
+      Enabled: true

@@ -1,0 +1,21 @@
+template:
+  path: monitoring/monitor.j2
+  type: file
+
+dependencies:
+  - dev/monitoring/alerts.yaml
+  - dev/airflow.yaml
+  - dev/airflow-services.yaml
+
+parameters:
+  Env: "{{ var.env }}"
+  AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
+  ClusterName: !stack_output dev/airflow.yaml::EcsClusterName
+  FargateWorkerTaskDefinitionArn: !stack_output dev/airflow.yaml::AirflowWorkerTaskDefArn
+  ExpectedServiceTasks: !stack_output dev/airflow-services.yaml::ExpectedServiceTaskCount
+  ComputeAgeHoursThreshold: {{ var.compute_age_hours_threshold }}
+  Ec2LaunchesPer10MinutesThreshold: {{ var.ec2_launches_per_10_minutes_threshold }}
+  FargateWorkerLaunchesPer10MinutesThreshold: {{ var.fargate_worker_launches_per_10_minutes_threshold }}
+
+capabilities:
+  - CAPABILITY_IAM

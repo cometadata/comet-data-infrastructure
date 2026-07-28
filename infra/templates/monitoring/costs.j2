@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'COMET cost budgets'
+
+Parameters:
+  AlertTopicArn:
+    Type: String
+
+  MonthlyBudgetUsd:
+    Type: Number
+
+  EgressBudgetGb:
+    Type: Number
+
+Resources:
+  # Create a monthly budget for resources tagged with this service and
+  # environment. Send alerts when actual spending exceeds 75%, 90%, or 100%
+  # of the budget, or when forecasted spending exceeds 100%.
+  MonthlyCostBudget:
+    Type: 'AWS::Budgets::Budget'
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-monthly-cost'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        FilterExpression:
+          And:
+            - Tags:
+                Key: user:Service
+                Values:
+                  - '{{ sceptre_user_data.stack_tags.Service }}'
+            - Tags:
+                Key: user:Environment
+                Values:
+                  - '{{ sceptre_user_data.stack_tags.Environment }}'
+        Metrics:
+          - AmortizedCost
+      NotificationsWithSubscribers:
+{% for notification_type, threshold in [('ACTUAL', 75), ('ACTUAL', 90), ('ACTUAL', 100), ('FORECASTED', 100)] %}
+        - Notification:
+            NotificationType: {{ notification_type }}
+            ComparisonOperator: GREATER_THAN
+            Threshold: {{ threshold }}
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopicArn
+{% endfor %}
+
+  # Track monthly internet egress for this service and environment. Send alerts
+  # when usage exceeds 50%, 75%, or 100% of the budget, or when forecasted
+  # usage exceeds 100%.
+  EgressBudget:
+    Type: 'AWS::Budgets::Budget'
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-egress'
+        BudgetType: USAGE
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref EgressBudgetGb
+          Unit: GB
+        FilterExpression:
+          And:
+            - Tags:
+                Key: user:Service
+                Values:
+                  - '{{ sceptre_user_data.stack_tags.Service }}'
+            - Tags:
+                Key: user:Environment
+                Values:
+                  - '{{ sceptre_user_data.stack_tags.Environment }}'
+            - Dimensions:
+                Key: USAGE_TYPE_GROUP
+                Values:
+                  - 'EC2: Data Transfer - Internet (Out)'
+                  - 'S3: Data Transfer - Internet (Out)'
+        Metrics:
+          - UsageQuantity
+      NotificationsWithSubscribers:
+{% for notification_type, threshold in [('ACTUAL', 50), ('ACTUAL', 75), ('ACTUAL', 100), ('FORECASTED', 100)] %}
+        - Notification:
+            NotificationType: {{ notification_type }}
+            ComparisonOperator: GREATER_THAN
+            Threshold: {{ threshold }}
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopicArn
+{% endfor %}

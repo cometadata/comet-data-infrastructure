@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Creates a shared SNS topic that forwards monitoring and budget alerts to the configured email addresses'
+
+Resources:
+  AlertTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alerts'
+
+  AlertTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      Topics: [ !Ref AlertTopic ]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAwsServicePublish
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudwatch.amazonaws.com
+                - events.rds.amazonaws.com
+            Action: 'sns:Publish'
+            Resource: !Ref AlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+          - Sid: AllowBudgetsPublish
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: 'sns:Publish'
+            Resource: !Ref AlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:*'
+{% for email in sceptre_user_data.alert_emails %}
+
+  EmailSubscription{{ loop.index }}:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: '{{ email }}'
+{% endfor %}
+
+Outputs:
+  AlertTopicArn:
+    Value: !Ref AlertTopic
