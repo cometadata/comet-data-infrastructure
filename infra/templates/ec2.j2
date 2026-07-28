@@ -207,3 +207,6 @@ Resources:
 Outputs:
   EC2InstanceRoleArn:
     Value: !GetAtt EC2InstanceRole.Arn
+
+  AutoScalingGroupName:
+    Value: !Ref AutoScalingGroup

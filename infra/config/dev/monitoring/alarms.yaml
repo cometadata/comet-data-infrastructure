@@ -1,0 +1,17 @@
+template:
+  path: monitoring/alarms.j2
+  type: file
+
+dependencies:
+  - dev/monitoring/alerts.yaml
+  - dev/rds.yaml
+  - dev/s3.yaml
+
+parameters:
+  AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
+  DbInstanceIdentifier: !stack_output dev/rds.yaml::DbInstanceIdentifier
+  DataBucketName: !stack_output dev/s3.yaml::DataBucketName
+  DagsBucketName: !stack_output dev/s3.yaml::AirflowDagsBucketName
+  LogsBucketName: !stack_output dev/s3.yaml::AirflowLogsBucketName
+  LogIngestionBytesPer5MinThreshold: {{ var.log_ingestion_threshold_mib_per_5_minutes * 1024 * 1024 }}
+  S3TotalBytesThreshold: {{ var.s3_total_storage_threshold_gib * 1024 * 1024 * 1024 }}
