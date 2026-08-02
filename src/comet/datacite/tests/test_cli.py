@@ -21,6 +21,8 @@ class TestDataciteDownloadCommand:
                     "s3://my-bucket/datacite_ingest/run-1/",
                     "--datacite-bucket-name",
                     "datacite-source",
+                    "--datacite-bucket-region",
+                    "eu-west-1",
                     "--expected-file-count",
                     "350",
                     "--expected-total-bytes",
@@ -32,6 +34,7 @@ class TestDataciteDownloadCommand:
         mock_download.assert_called_once_with(
             target_uri="s3://my-bucket/datacite_ingest/run-1/",
             datacite_bucket_name="datacite-source",
+            datacite_bucket_region="eu-west-1",
             expected_file_count=350,
             expected_total_bytes=1200,
         )

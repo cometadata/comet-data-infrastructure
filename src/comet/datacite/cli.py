@@ -15,6 +15,7 @@ def download(
     *,
     target_uri: str,
     datacite_bucket_name: str,
+    datacite_bucket_region: str,
     expected_file_count: int,
     expected_total_bytes: int,
 ) -> None:
@@ -23,6 +24,7 @@ def download(
     Args:
         target_uri: Destination S3 URI for the DataCite snapshot (trailing slash).
         datacite_bucket_name: Source DataCite S3 bucket.
+        datacite_bucket_region: AWS region of the source DataCite bucket.
         expected_file_count: Expected number of .jsonl.gz files (from MANIFEST.json).
         expected_total_bytes: Expected total size of the .jsonl.gz files in bytes.
     """
@@ -33,6 +35,7 @@ def download(
     datacite.download_datacite(
         target_uri=target_uri,
         datacite_bucket_name=datacite_bucket_name,
+        datacite_bucket_region=datacite_bucket_region,
         expected_file_count=expected_file_count,
         expected_total_bytes=expected_total_bytes,
     )

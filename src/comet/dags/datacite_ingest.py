@@ -131,6 +131,8 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
                     "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
                     "--datacite-bucket-name",
                     "{{ params.datacite_bucket_name }}",
+                    "--datacite-bucket-region",
+                    "{{ params.datacite_bucket_region }}",
                     "--expected-file-count",
                     "{{ ti.xcom_pull(task_ids='fetch_release')['metadata']['file_count'] }}",
                     "--expected-total-bytes",
