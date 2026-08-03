@@ -157,6 +157,7 @@ Resources:
   AirflowS3ManagedPolicy:
     Type: 'AWS::IAM::ManagedPolicy'
     Properties:
+      Path: !Sub '/comet/${Env}/airflow/'
       Description: 'Read DAGs from S3, write task logs to S3'
       PolicyDocument:
         Version: '2012-10-17'
@@ -183,6 +184,8 @@ Resources:
   EcsTaskExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/airflow/service/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -211,6 +214,8 @@ Resources:
   EcsTaskRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/airflow/service/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -252,6 +257,9 @@ Resources:
                 Resource:
                   - !GetAtt AirflowWorkerExecutionRole.Arn
                   - !GetAtt AirflowWorkerTaskRole.Arn
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService': 'ecs-tasks.amazonaws.com'
         # The triggerer polls Batch job status.
         - PolicyName: airflow-batch-describe
           PolicyDocument:
@@ -277,6 +285,8 @@ Resources:
   AirflowWorkerExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/airflow/worker/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -290,6 +300,8 @@ Resources:
   AirflowWorkerTaskRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/airflow/worker/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -310,11 +322,13 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-queue/comet-${Env}-batch-*'
                   - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
+                  - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job/*'
               - Effect: Allow
-                Action:
-                  - 'batch:DescribeJobs'
-                  - 'batch:TerminateJob'
+                Action: 'batch:DescribeJobs'
                 Resource: '*'
+              - Effect: Allow
+                Action: 'batch:TerminateJob'
+                Resource: !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job/*'
         # Read/write the dataset-releases table.
         - PolicyName: airflow-dynamodb
           PolicyDocument:
@@ -351,9 +365,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: 'logs:GetLogEvents'
-                Resource:
-                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/batch/job:log-stream:*'
-                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/batch/job:log-stream:*'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/batch/job:log-stream:*'
 
   AirflowLogGroup:
     Type: 'AWS::Logs::LogGroup'
@@ -592,10 +604,7 @@ Resources:
       TaskRoleArn: !GetAtt AirflowWorkerTaskRole.Arn
       # Tags do not automatically propagate to task definitions
       Tags:
-{% for key, value in sceptre_user_data.stack_tags.items() %}
-        - Key: '{{ key }}'
-          Value: '{{ value }}'
-{% endfor %}
+{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
       ContainerDefinitions:
         - Name: worker
           Image: !Ref AirflowImage

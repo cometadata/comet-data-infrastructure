@@ -11,7 +11,7 @@ from comet.airflow.utils import (
     get_triggering_release_key_or_none,
     resolve_release_record,
 )
-from comet.aws import batch_job_definition_name, batch_job_name, batch_job_queue_name
+from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name
 from comet.constants import DATACITE_DATASET_NAME, DATACITE_RESOURCE_TYPE_GENERAL_DATASET_NAME
 from comet.dags.datacite_enrich_params import DataCiteEnrichParams, enrich_trigger_params
 import comet.dynamodb_store as dataset_releases
@@ -76,6 +76,7 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
             job_name="{{ batch_job_name(get_env(), 'enrich-resource-type-general') }}",
             job_queue="{{ batch_job_queue_name(get_env(), 'enrich-resource-type-general') }}",
             job_definition="{{ batch_job_definition_name(get_env(), 'enrich') }}",
+            tags=BATCH_JOB_TAGS,
             container_overrides={
                 "resourceRequirements": [
                     {"type": "VCPU", "value": ENRICH_VCPU},

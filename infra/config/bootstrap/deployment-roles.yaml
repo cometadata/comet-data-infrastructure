@@ -1,0 +1,18 @@
+template:
+  path: 'bootstrap/deployment-roles.yaml'
+  type: 'file'
+
+template_bucket_name: "{{ var.template_bucket }}"
+
+dependencies:
+  - bootstrap/workload-boundary.yaml
+
+parameters:
+  BoundaryArn: !stack_output bootstrap/workload-boundary.yaml::BoundaryArn
+  CodeConnectionArn: "{{ var.code_connection_arn }}"
+  Env: "{{ var.env }}"
+  SsmPrefix: "{{ var.ssm_prefix }}"
+  TemplateBucketName: "{{ var.template_bucket }}"
+
+capabilities:
+  - CAPABILITY_IAM

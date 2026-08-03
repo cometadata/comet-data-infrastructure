@@ -3,18 +3,23 @@
 env: dev
 region: us-east-1
 template_bucket: your-comet-dev-cloudformation
+codebuild_image: aws/codebuild/amazonlinux-x86_64-standard:6.0
 
-# SSM Parameter Store path prefix for cross-step values (e.g. the Airflow image digest URI
-# written by `make push-airflow-dev`). MUST equal the SSM_PREFIX env var used by the Makefile.
-# Resolved path: {ssm_prefix}/{env}/AirflowEcrImageUri
+# SSM Parameter Store path prefix for image digest parameters
+# ({ssm_prefix}/{env}/images/...) and the vars-dev.yaml copy the deploy project reads.
 ssm_prefix: /your-org/comet
 
-# Service and Environment scope monitoring and budgets.
+# CodeConnections connection to GitHub (Developer Tools console -> Settings -> Connections),
+# used by the build pipeline and the deploy project.
+code_connection_arn: ''
+
+# GitHub repository in owner/name form.
+github_repository_id: cometadata/comet-data-infrastructure
+
+# Metadata stack tags. The Environment and Service tags are injected by the Sceptre configs.
 stack_tags:
   CodeRepo: https://github.com/cometadata/comet-data-infrastructure
   Contact: ''
-  Environment: dev
-  Service: comet
 
 # Budget and alarm thresholds.
 monthly_budget_usd: 150
@@ -30,7 +35,8 @@ fargate_worker_launches_per_10_minutes_threshold: 15
 alert_emails:
   - alerts@example.org
 
-# Format: "<stack-name>::<output-key> <aws-profile>"
+# Shared network resources created outside this project.
+# Format: "<stack-name>::<output-key>"
 vpc_stack_output: ''
 route_table_stack_output: ''
 public_subnet_a_stack_output: ''
@@ -55,8 +61,17 @@ instance_shutdown_timezone: America/Los_Angeles
 # out-of-band with keys `account_id` and `password`, e.g.:
 #   aws secretsmanager create-secret --name comet-dev-batch-datacite-credentials \
 #     --secret-string '{"account_id":"<id>","password":"<password>"}'
+# Use the default aws/secretsmanager encryption key.
 datacite_credentials_secret_arn: ''
 
 # ARN of the Airflow Fernet key secret. CloudFormation does not manage this secret;
-# see "Rotating the Fernet key" in docs/setup.md.
+# use the default aws/secretsmanager encryption key and see "Rotating the Fernet key"
+# in docs/setup.md.
 fernet_secret_arn: ''
+
+# Outputs of the two bootstrap stacks (`make bootstrap`). The boundary caps every COMET workload
+# role, the runner role executes the deploy project, and CloudFormation assumes the service role to
+# create environment resources. See "Deployment permissions" in docs/setup.md.
+permissions_boundary_arn: ''
+cloudformation_service_role_arn: ''
+deployment_runner_role_arn: ''

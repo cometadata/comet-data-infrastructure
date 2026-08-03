@@ -13,6 +13,7 @@ from conftest import (
     TaggedLoader,
     TaggedValue,
     alarm_metrics,
+    example_variables,
     metric_resource_target,
     resources_of_type,
 )
@@ -38,7 +39,17 @@ class TestAlarms:
         )
 
     def test_every_bucket_has_a_storage_metric(self, resources, alarm_parameter_targets):
-        expected = {(name, logical_id) for name, logical_id, _ in resources_of_type(resources, "AWS::S3::Bucket")}
+        expected = {
+            (name, logical_id)
+            for name, logical_id, _ in resources_of_type(resources, "AWS::S3::Bucket")
+            if name == "s3.j2"
+        }
+        assert {logical_id for _, logical_id in expected} == {
+            "S3Bucket",
+            "AirflowDagsBucket",
+            "AirflowLogsBucket",
+            "ArtifactBucket",
+        }
         covered = {
             target
             for _, _, metric in alarm_metrics(resources)
@@ -46,6 +57,14 @@ class TestAlarms:
             if (target := metric_resource_target(metric, "BucketName", alarm_parameter_targets))
         }
         assert expected <= covered, f"buckets missing BucketSizeBytes: {sorted(expected - covered)}"
+
+    def test_total_storage_expression_includes_every_bucket_metric(self, rendered_templates):
+        alarm = rendered_templates["monitoring/alarms.j2"]["Resources"]["S3TotalStorageAlarm"]
+        queries = alarm["Properties"]["Metrics"]
+        [total] = [query for query in queries if query.get("ReturnData")]
+        metric_ids = {query["Id"] for query in queries if "MetricStat" in query}
+
+        assert set(total["Expression"].split(" + ")) == metric_ids
 
     def test_every_db_instance_gets_low_storage_events(self, resources, alarm_parameter_targets):
         expected = {(name, logical_id) for name, logical_id, _ in resources_of_type(resources, "AWS::RDS::DBInstance")}
@@ -588,7 +607,7 @@ class TestMonitoringConfig:
 
     @pytest.fixture
     def config_variables(self):
-        return yaml.safe_load((PROJECT_DIR / "vars-dev.yaml.example").read_text())
+        return example_variables()
 
     @pytest.mark.parametrize("alert_emails", [None, []])
     def test_alert_emails_must_be_present_and_nonempty(self, config_template, config_variables, alert_emails):
@@ -606,29 +625,32 @@ class TestMonitoringConfig:
         config = yaml.load(rendered, Loader=TaggedLoader)
         assert config["sceptre_user_data"]["alert_emails"] == ["alerts@example.org"]
 
-    def test_stack_tags_are_forwarded_without_derived_tags(self, config_template, config_variables):
+    def test_environment_and_service_tags_are_injected_into_stack_tags(self, config_template, config_variables):
         root_config_template = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(
             (PROJECT_DIR / "infra" / "config" / "config.yaml").read_text()
         )
 
+        assert not {"Environment", "Service"} & set(config_variables["stack_tags"])
+        expected = {**config_variables["stack_tags"], "Environment": "dev", "Service": "comet"}
         root_config = yaml.safe_load(root_config_template.render(var=config_variables))
-        environment_config = yaml.load(
-            config_template.render(var=config_variables),
-            Loader=TaggedLoader,
-        )
+        environment_config = yaml.load(config_template.render(var=config_variables), Loader=TaggedLoader)
 
-        assert root_config["stack_tags"] == config_variables["stack_tags"]
-        assert environment_config["sceptre_user_data"]["stack_tags"] == config_variables["stack_tags"]
+        assert root_config["stack_tags"] == expected
+        assert environment_config["sceptre_user_data"]["stack_tags"] == expected
 
-    def test_environment_tag_must_match_environment_name(self, config_template, config_variables):
+    def test_injected_tags_override_values_from_the_vars_file(self, config_template, config_variables):
         variables = config_variables.copy()
         variables["stack_tags"] = {
             **config_variables["stack_tags"],
             "Environment": "production",
+            "Service": "not-comet",
         }
 
-        with pytest.raises(jinja2.UndefinedError, match="environment_tag_must_match_env"):
-            config_template.render(var=variables)
+        rendered = yaml.load(config_template.render(var=variables), Loader=TaggedLoader)
+
+        tags = rendered["sceptre_user_data"]["stack_tags"]
+        assert tags["Environment"] == "dev"
+        assert tags["Service"] == "comet"
 
     def test_threshold_variables_are_converted_and_passed_as_required_parameters(
         self, rendered_templates, stack_configs

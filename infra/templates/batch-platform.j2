@@ -26,18 +26,14 @@ Parameters:
     Type: String
 
 Resources:
-  # Create /aws/batch/job ourselves so it gets a retention policy.
-  BatchDefaultLogGroup:
-    Type: 'AWS::Logs::LogGroup'
-    DeletionPolicy: Retain
-    Properties:
-      LogGroupName: '/aws/batch/job'
-      RetentionInDays: 14
-
   BatchLaunchTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
     Properties:
       LaunchTemplateName: !Sub 'comet-${Env}-batch-launch-template'
+      TagSpecifications:
+        - ResourceType: 'launch-template'
+          Tags:
+{% filter indent(12, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
       LaunchTemplateData:
         # IMDSv2 only; the hop limit of 1 stops job containers reading the instance role credentials.
         # Jobs get their own credentials from their ECS task roles instead.
@@ -55,10 +51,7 @@ Resources:
 {% for rtype in ['instance', 'volume'] %}
           - ResourceType: '{{ rtype }}'
             Tags:
-{% for key, value in sceptre_user_data.stack_tags.items() %}
-              - Key: '{{ key }}'
-                Value: '{{ value }}'
-{% endfor %}
+{% filter indent(14, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
 {% endfor %}
         UserData:
           Fn::Base64: !Sub |
@@ -98,24 +91,11 @@ Resources:
 
             --==BOUNDARY==--
 
-  BatchServiceRole:
-    Type: 'AWS::IAM::Role'
-    Properties:
-      RoleName: !Sub 'comet-${Env}-batch-service-role'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: 'Allow'
-            Principal:
-              Service: 'batch.amazonaws.com'
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole'
-
   BatchInstanceRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      RoleName: !Sub 'comet-${Env}-batch-instance-role'
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/batch/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -131,20 +111,17 @@ Resources:
   BatchInstanceProfile:
     Type: 'AWS::IAM::InstanceProfile'
     Properties:
-      InstanceProfileName: !Sub 'comet-${Env}-batch-instance-profile'
+      Path: !Sub '/comet/${Env}/batch/'
       Roles:
         - !Ref BatchInstanceRole
 
 {% for q in queues %}
   {{ q.prefix }}ComputeEnvironment:
     Type: 'AWS::Batch::ComputeEnvironment'
-    # Make sure the log group exists before Batch jobs write to it.
-    DependsOn:
-      - BatchDefaultLogGroup
     Properties:
-      # Naming the CE forces delete+recreate on update.
+      # Omit the name so CloudFormation can replace the compute environment.
+      # Omit ServiceRole so Batch uses its service-linked role.
       Type: 'MANAGED'
-      ServiceRole: !Ref BatchServiceRole
       ComputeResources:
         Type: 'EC2'
         Ec2Configuration:
@@ -158,6 +135,7 @@ Resources:
 {% endfor %}
         LaunchTemplate:
           LaunchTemplateId: !Ref BatchLaunchTemplate
+          # Pick up launch-template changes without changing its default version.
           Version: !GetAtt BatchLaunchTemplate.LatestVersionNumber
         Subnets:
           - !Ref SubnetId
@@ -183,8 +161,6 @@ Resources:
 {% endfor %}
 
 Outputs:
-  BatchDefaultLogGroupName:
-    Value: !Ref BatchDefaultLogGroup
 {% for q in queues %}
   {{ q.prefix }}JobQueueName:
     Value: !Sub 'comet-${Env}-batch-{{ q.name }}-job-queue'

@@ -3,6 +3,7 @@ template:
   type: 'file'
 
 parameters:
+  Env: "{{ var.env }}"
   ImageId: !ssm '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
   SubnetId: !stack_attr sceptre_user_data.public_subnet
   DataBucketName: !stack_output dev/s3.yaml::DataBucketName

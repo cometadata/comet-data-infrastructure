@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Permissions boundary for COMET workload roles'
+
+# Deployed manually so this boundary can change independently of the deployment roles.
+
+Parameters:
+  Env:
+    Type: String
+
+  CodeConnectionArn:
+    Type: String
+
+  FernetSecretArn:
+    Type: String
+
+  DataCiteCredentialsSecretArn:
+    Type: String
+
+Resources:
+  WorkloadBoundary:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Path: !Sub '/comet/bootstrap/${Env}/'
+      Description: 'Maximum permissions for roles created by COMET environment stacks'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # Discovery, metrics, and Systems Manager agent actions that require Resource: '*'.
+          - Sid: 'HostAgentAndDiscoveryActions'
+            Effect: 'Allow'
+            Action:
+              - 'batch:DescribeJobs'
+              - 'cloudwatch:PutMetricData'
+              - 'ec2:Describe*'
+              - 'ec2messages:*'
+              - 'ecr:GetAuthorizationToken'
+              - 'ecs:DiscoverPollEndpoint'
+              - 'ecs:ListTasks'
+              - 'ssm:DescribeAssociation'
+              - 'ssm:DescribeDocument'
+              - 'ssm:GetDeployablePatchSnapshotForInstance'
+              - 'ssm:GetDocument'
+              - 'ssm:GetManifest'
+              - 'ssm:ListAssociations'
+              - 'ssm:ListInstanceAssociations'
+              - 'ssm:PutComplianceItems'
+              - 'ssm:PutConfigurePackageResult'
+              - 'ssm:PutInventory'
+              - 'ssm:UpdateAssociationStatus'
+              - 'ssm:UpdateInstanceAssociationStatus'
+              - 'ssm:UpdateInstanceInformation'
+              - 'ssmmessages:*'
+            Resource: '*'
+
+          # General workload actions scoped to this environment's resources, Batch jobs,
+          # agent parameters, and ARNs supplied as stack parameters.
+          - Sid: 'EnvironmentWorkloadActions'
+            Effect: 'Allow'
+            Action:
+              - 'batch:*'
+              - 'codebuild:*'
+              - 'codeconnections:UseConnection'
+              - 'codestar-connections:UseConnection'
+              - 'dynamodb:*'
+              - 'ecr:*'
+              - 'ecs:*'
+              - 'logs:*'
+              - 's3:*'
+              - 'secretsmanager:DescribeSecret'
+              - 'secretsmanager:GetSecretValue'
+              - 'ssm:GetParameter*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:job-queue/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:job/*'
+              - !Sub 'arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/comet-${Env}-*/*'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/comet-${Env}-*:*'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/comet-${Env}-*/*'
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/*'
+              - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/AmazonCloudWatch-*'
+              - !Sub 'arn:${AWS::Partition}:s3:::comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:s3:::arxiv'
+              - !Sub 'arn:${AWS::Partition}:s3:::arxiv/*'
+              - !Ref CodeConnectionArn
+              - !Ref FernetSecretArn
+              - !Ref DataCiteCredentialsSecretArn
+
+          # Allows this environment's Airflow worker roles to be passed only to ECS tasks.
+          - Sid: 'PassAirflowWorkerRoles'
+            Effect: 'Allow'
+            Action: 'iam:PassRole'
+            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/${Env}/airflow/worker/*'
+            Condition:
+              StringEquals:
+                'iam:PassedToService': 'ecs-tasks.amazonaws.com'
+
+          # Prevents workload roles from removing or replacing any role's permissions boundary.
+          - Sid: 'ProtectBoundaryAttachment'
+            Effect: 'Deny'
+            Action:
+              - 'iam:DeleteRolePermissionsBoundary'
+              - 'iam:PutRolePermissionsBoundary'
+            Resource: '*'
+
+          # Prevents workload roles from modifying bootstrap roles and policies, including
+          # this permissions boundary.
+          - Sid: 'ProtectBootstrapIam'
+            Effect: 'Deny'
+            Action: 'iam:*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/comet/bootstrap/${Env}/*'
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/bootstrap/${Env}/*'
+
+Outputs:
+  BoundaryArn:
+    Description: 'Set as permissions_boundary_arn in vars-<env>.yaml'
+    Value: !Ref WorkloadBoundary

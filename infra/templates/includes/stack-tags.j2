@@ -1,0 +1,4 @@
+{% for key, value in sceptre_user_data.stack_tags.items() -%}
+- Key: '{{ key }}'
+  Value: '{{ value }}'
+{% endfor -%}
