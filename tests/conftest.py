@@ -9,6 +9,13 @@ PROJECT_DIR = Path(__file__).parent.parent
 CONFIG_DIR = PROJECT_DIR / "infra" / "config"
 TEMPLATES_DIR = PROJECT_DIR / "infra" / "templates"
 
+# Test values for bootstrap ARNs omitted from vars-dev.yaml.example.
+BOOTSTRAP_ARN_STUBS = {
+    "permissions_boundary_arn": "arn:aws:iam::123456789012:policy/comet/bootstrap/dev/boundary",
+    "cloudformation_service_role_arn": "arn:aws:iam::123456789012:role/comet/bootstrap/dev/cloudformation/service",
+    "deployment_runner_role_arn": "arn:aws:iam::123456789012:role/comet/bootstrap/dev/runner/runner",
+}
+
 # Matches sceptre_user_data in infra/config/dev/config.yaml.
 STUB_USER_DATA = {
     "ssm_path": "/comet/dev",
@@ -16,13 +23,20 @@ STUB_USER_DATA = {
         "CodeRepo": "https://github.com/cometadata/comet-data-infrastructure",
         "Contact": "someone",
         "Environment": "dev",
-        "Service": "test-service",
+        "Service": "comet",
     },
     "vpc_id": "vpc-00000000",
     "public_subnet": "subnet-00000000",
-    "ecr": {"name": "comet-dev", "tag": "latest"},
     "alert_emails": ["alerts@example.org"],
+    "permissions_boundary_arn": BOOTSTRAP_ARN_STUBS["permissions_boundary_arn"],
 }
+
+
+def example_variables():
+    """Load vars-dev.yaml.example and fill in the bootstrap ARNs it leaves empty."""
+    variables = yaml.safe_load((PROJECT_DIR / "vars-dev.yaml.example").read_text())
+    variables.update(BOOTSTRAP_ARN_STUBS)
+    return variables
 
 
 @dataclass(frozen=True)
@@ -58,7 +72,11 @@ def rendered_templates():
         undefined=jinja2.StrictUndefined,
     )
     rendered = {}
-    for path in sorted(TEMPLATES_DIR.glob("**/*.j2")):
+    template_paths = [
+        *TEMPLATES_DIR.glob("**/*.j2"),
+        *(TEMPLATES_DIR / "bootstrap").glob("*.yaml"),
+    ]
+    for path in sorted(template_paths):
         if "includes" in path.parts:
             continue
         name = path.relative_to(TEMPLATES_DIR).as_posix()
@@ -88,7 +106,7 @@ def tag_keys(tag_list):
 @pytest.fixture(scope="session")
 def stack_configs():
     """Render Sceptre configs, keyed by stack path."""
-    variables = yaml.safe_load((PROJECT_DIR / "vars-dev.yaml.example").read_text())
+    variables = example_variables()
     stack_group_config = {"sceptre_user_data": {"ssm_path": "/comet/dev"}}
     configs = {}
     for path in sorted((CONFIG_DIR / "dev").glob("**/*.yaml")):
@@ -97,6 +115,18 @@ def stack_configs():
         source = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(path.read_text())
         body = source.render(var=variables, stack_group_config=stack_group_config)
         configs[path.relative_to(CONFIG_DIR).as_posix()] = yaml.load(body, Loader=TaggedLoader)
+    return configs
+
+
+@pytest.fixture(scope="session")
+def bootstrap_stack_configs():
+    """Render bootstrap Sceptre configs, keyed by stack path."""
+    variables = example_variables()
+    configs = {}
+    for path in sorted((CONFIG_DIR / "bootstrap").glob("*.yaml")):
+        source = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(path.read_text())
+        body = source.render(var=variables)
+        configs[path.name] = yaml.load(body, Loader=TaggedLoader)
     return configs
 
 

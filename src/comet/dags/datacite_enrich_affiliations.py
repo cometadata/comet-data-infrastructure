@@ -12,7 +12,7 @@ from comet.airflow.utils import (
     get_triggering_release_key_or_none,
     resolve_release_record,
 )
-from comet.aws import batch_job_definition_name, batch_job_name, batch_job_queue_name, s3_uri
+from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name, s3_uri
 from comet.constants import DATACITE_AFFILIATIONS_DATASET_NAME, DATACITE_DATASET_NAME, ROR_DATASET_NAME
 from comet.dags.datacite_enrich_params import DataCiteEnrichAffiliationsParams, enrich_trigger_params
 import comet.dynamodb_store as dataset_releases
@@ -109,6 +109,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
             job_name="{{ batch_job_name(get_env(), 'enrich-affiliations') }}",
             job_queue="{{ batch_job_queue_name(get_env(), 'enrich-affiliations') }}",
             job_definition="{{ batch_job_definition_name(get_env(), 'enrich-with-ror') }}",
+            tags=BATCH_JOB_TAGS,
             ecs_properties_override={
                 "taskProperties": [
                     {

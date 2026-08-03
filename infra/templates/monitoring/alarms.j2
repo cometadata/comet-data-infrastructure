@@ -18,6 +18,9 @@ Parameters:
   LogsBucketName:
     Type: String
 
+  ArtifactBucketName:
+    Type: String
+
   LogIngestionBytesPer5MinThreshold:
     Type: Number
 
@@ -60,13 +63,14 @@ Resources:
       OKActions: [ !Ref AlertTopicArn ]
       Metrics:
         - Id: total
-          Expression: 'data + dags + logs'
+          Expression: 'data + dags + logs + artifacts'
           Label: TotalStandardStorageBytes
           ReturnData: true
 {% for metric_id, parameter in [
   ('data', 'DataBucketName'),
   ('dags', 'DagsBucketName'),
   ('logs', 'LogsBucketName'),
+  ('artifacts', 'ArtifactBucketName'),
 ] %}
         - Id: {{ metric_id }}
           ReturnData: false

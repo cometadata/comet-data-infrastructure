@@ -1,3 +1,5 @@
+import json
+
 from conftest import resources_of_type, tag_keys
 
 
@@ -18,10 +20,17 @@ class TestTagging:
         problems = []
 
         for name, logical_id, resource in resources_of_type(resources, "AWS::EC2::LaunchTemplate"):
-            specs = resource["Properties"]["LaunchTemplateData"].get("TagSpecifications", [])
-            instance_tags = [tag_keys(s.get("Tags")) for s in specs if s.get("ResourceType") == "instance"]
-            if not any(self.required_scope_tags <= keys for keys in instance_tags):
-                problems.append(f"{name}:{logical_id} launch template does not tag instances with scope tags")
+            properties = resource["Properties"]
+            template_specs = properties.get("TagSpecifications", [])
+            data_specs = properties["LaunchTemplateData"].get("TagSpecifications", [])
+            for resource_type, specs in [
+                ("launch-template", template_specs),
+                ("instance", data_specs),
+                ("volume", data_specs),
+            ]:
+                tags = [tag_keys(s.get("Tags")) for s in specs if s.get("ResourceType") == resource_type]
+                if not any(self.required_scope_tags <= keys for keys in tags):
+                    problems.append(f"{name}:{logical_id} does not tag {resource_type} resources with scope tags")
 
         for name, logical_id, resource in resources_of_type(resources, "AWS::ECS::Service"):
             if resource["Properties"].get("PropagateTags") != "SERVICE":
@@ -33,3 +42,38 @@ class TestTagging:
                 problems.append(f"{name}:{logical_id} compute environment does not tag instances with scope tags")
 
         assert not problems, problems
+
+    def test_cloud_map_and_notification_rules_rely_on_inherited_stack_tags(self, resources):
+        inherited_types = {
+            "AWS::CodeStarNotifications::NotificationRule",
+            "AWS::ServiceDiscovery::PrivateDnsNamespace",
+            "AWS::ServiceDiscovery::Service",
+        }
+        manually_tagged = [
+            f"{name}:{logical_id}"
+            for name, logical_id, resource in resources
+            if resource["Type"] in inherited_types
+            if "Tags" in resource["Properties"]
+        ]
+
+        assert not manually_tagged
+
+    def test_ecr_retention_only_expires_sha_and_untagged_images(self, rendered_templates):
+        resources = rendered_templates["ecr.j2"]["Resources"]
+
+        for logical_id in ("BatchRepository", "MarpleRepository", "AirflowRepository"):
+            policy = json.loads(resources[logical_id]["Properties"]["LifecyclePolicy"]["LifecyclePolicyText"])
+            selections = [rule["selection"] for rule in policy["rules"]]
+            assert selections == [
+                {
+                    "tagStatus": "tagged",
+                    "tagPrefixList": ["sha-"],
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 50,
+                },
+                {
+                    "tagStatus": "untagged",
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 3,
+                },
+            ]

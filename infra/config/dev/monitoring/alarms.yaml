@@ -13,5 +13,6 @@ parameters:
   DataBucketName: !stack_output dev/s3.yaml::DataBucketName
   DagsBucketName: !stack_output dev/s3.yaml::AirflowDagsBucketName
   LogsBucketName: !stack_output dev/s3.yaml::AirflowLogsBucketName
+  ArtifactBucketName: !stack_output dev/s3.yaml::ArtifactBucketName
   LogIngestionBytesPer5MinThreshold: {{ var.log_ingestion_threshold_mib_per_5_minutes * 1024 * 1024 }}
   S3TotalBytesThreshold: {{ var.s3_total_storage_threshold_gib * 1024 * 1024 * 1024 }}

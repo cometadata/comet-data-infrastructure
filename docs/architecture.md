@@ -59,7 +59,7 @@ Three job definitions:
 * `enrich`: generic single-container CPU enrichment, such as resource type reclassification.
 * `enrich-with-ror`: a [single-node multi-container job](https://docs.aws.amazon.com/batch/latest/userguide/create-job-definition-single-node-multi-container.html) used by the funders and affiliations enrichments. It runs an OpenSearch container, a [Marple](https://gitlab.com/crossref/labs/marple) container that seeds the ROR index, and the main container, which waits until Marple reports ready before running the enrichment binary.
 
-The `BatchOperator` sets the command and resource sizes for each run, so the job definitions don't need to be changed for each use case.
+When an Airflow task starts a Batch job, the `BatchOperator` supplies the command and CPU and memory requirements for that run. This lets several tasks reuse the same job definitions. It also tags each job with its environment and service so it can be identified with the rest of the deployment.
 
 ## Networking and security
 
@@ -78,21 +78,28 @@ The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image laye
 
 ## Container images
 
-| Image           | Built from           | Runs on                                                                  |
-|-----------------|----------------------|--------------------------------------------------------------------------|
-| `comet`         | `Dockerfile`         | Dev EC2 instance (arXiv pipeline; includes arxiv-tex-extract and DuckDB) |
-| `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs (comet package + `comet-enrich`)                          |
-| `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs                             |
-| `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers                                     |
+| Image           | Built from           | Runs on                                         |
+|-----------------|----------------------|-------------------------------------------------|
+| `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs and the dev EC2 arXiv pipeline   |
+| `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs    |
+| `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers            |
 
-Images are stored in ECR. The Airflow image is pinned by its sha256 digest, which is stored in SSM. Pushing a new image changes the task definition, which makes ECS redeploy the services.
+Images are stored in ECR and selected for deployment by sha256 digest in SSM. Main builds use `sha-*` tags; a release tag labels the existing images without rebuilding them. See [setup.md](setup.md#image-builds-and-releases) for the build and deployment procedure.
+
+## Deployment permissions
+
+COMET uses separate roles for CodeBuild and CloudFormation. CodeBuild can create, update, and delete only the environment's `comet-<env>-*` stacks and must ask CloudFormation to use the deployment service role. It can also read the external stack outputs used by the COMET configuration and run the Airflow database migration task. CloudFormation has broad permissions to provision the services used by the environment, but any IAM role it creates must have the COMET permissions boundary. It cannot create IAM users or access keys or change the roles and policies created by `make bootstrap`.
+
+The permissions boundary is attached to every IAM role created by the environment stacks, including roles for services, jobs, builds, and monitoring. An action is allowed only when both the role's own policy and the boundary allow it. The boundary permits access to the environment's resources and the AWS read and monitoring calls needed to run them, including calls made by Systems Manager and ECS agents. It prevents those roles from creating or editing IAM roles and policies.
+
+`make bootstrap` creates the boundary and the two deployment roles separately from the environment stacks. CloudFormation assigns their names, while their fixed IAM paths keep the ARN prefixes predictable when a role is replaced. See [Deployment permissions](setup.md#deployment-permissions) for the setup procedure.
 
 ## Monitoring and cost alerts
 
 ### Alarms
 
 * CloudWatch Logs: alarm when log ingestion exceeds the per-five-minute byte threshold in at least two of the last four periods.
-* S3: alarm when combined storage across the three project buckets exceeds the configured threshold.
+* S3: alarm when combined storage across the four project buckets exceeds the configured threshold.
 * RDS: forward low-storage and configuration-change events to the monitoring SNS topic.
 * EC2 and Fargate worker tasks:
   * Alarm when tasks exceeds the age threshold for two consecutive five-minute periods.
@@ -115,7 +122,6 @@ Monitoring notifications are delivered to every address in the `alert_emails` li
 
 Things to consider before using this stack in production:
 
-* Use CodePipeline and CodeBuild to automatically build the Docker images and deploy updates.
 * Subscribe the monitoring alerts SNS topic to Slack.
 * Enable Container Insights on the ECS cluster for per-task CPU/memory metrics.
 * Could enable UI access via an internal ALB with SSO.

@@ -14,7 +14,7 @@ from comet.airflow.utils import (
     get_airflow_connection,
     get_current_run_id,
 )
-from comet.aws import batch_job_definition_name, batch_job_name, batch_job_queue_name
+from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name
 from comet.constants import DATACITE_DATASET_NAME
 from comet.datacite.datacite import get_new_datacite_release, release_is_smaller, snapshot_stats
 import comet.dynamodb_store as dataset_releases
@@ -118,6 +118,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
             job_name="{{ batch_job_name(get_env(), 'download-datacite') }}",
             job_queue="{{ batch_job_queue_name(get_env(), 'download') }}",
             job_definition="{{ batch_job_definition_name(get_env(), 'download-datacite') }}",
+            tags=BATCH_JOB_TAGS,
             container_overrides={
                 "resourceRequirements": [
                     {"type": "VCPU", "value": DOWNLOAD_VCPU},

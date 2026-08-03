@@ -24,26 +24,6 @@ Resources:
         - AttributeName: release_date
           AttributeType: S
 
-  # Attached to the batch job role from batch-jobs.yaml.
-  BatchJobDynamoDbAccess:
-    Type: 'AWS::IAM::Policy'
-    Properties:
-      PolicyName: !Sub 'comet-${Env}-batch-job-dynamodb-access'
-      Roles:
-        - !Sub 'comet-${Env}-batch-job-role'
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Action:
-              - 'dynamodb:GetItem'
-              - 'dynamodb:PutItem'
-              - 'dynamodb:UpdateItem'
-              - 'dynamodb:Query'
-              - 'dynamodb:Scan'
-            Resource:
-              - !GetAtt DatasetReleasesTable.Arn
-
 Outputs:
   DatasetReleasesTableName:
     Value: !Ref DatasetReleasesTable

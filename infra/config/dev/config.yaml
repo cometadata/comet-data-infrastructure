@@ -1,10 +1,13 @@
-{% if var.stack_tags.Environment != var.env %}
-{{ environment_tag_must_match_env }}
-{% endif %}
 {% if var.alert_emails is not defined or not var.alert_emails %}
 {{ alert_emails_must_contain_at_least_one_address }}
 {% endif %}
+{% if not var.permissions_boundary_arn or not var.cloudformation_service_role_arn or not var.deployment_runner_role_arn %}
+{{ bootstrap_arns_must_be_set_see_make_bootstrap }}
+{% endif %}
 template_bucket_name: "{{ var.template_bucket }}"
+
+# Sceptre delegates environment stack provisioning to this bootstrap-managed role.
+cloudformation_service_role: "{{ var.cloudformation_service_role_arn }}"
 
 vars:
   env: dev
@@ -12,11 +15,9 @@ vars:
 sceptre_user_data:
   ssm_path: "{{ var.ssm_prefix }}/dev"
   # allows stack_tags to be used in Jinja templates
-  stack_tags: {{ var.stack_tags | tojson }}
+  stack_tags: {{ dict(var.stack_tags, Environment=var.env, Service='comet') | tojson }}
   alert_emails: {{ var.alert_emails | tojson }}
   vpc_id: !stack_output_external {{ var.vpc_stack_output }}
   public_subnet: !stack_output_external {{ var.public_subnet_a_stack_output }}
-
-  ecr:
-    name: comet-dev
-    tag: latest
+  # Attached to every workload role the environment stacks create.
+  permissions_boundary_arn: "{{ var.permissions_boundary_arn }}"

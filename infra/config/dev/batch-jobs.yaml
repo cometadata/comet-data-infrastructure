@@ -4,17 +4,17 @@ template:
 
 dependencies:
   - dev/s3.yaml
-  - dev/ecr.yaml
+  - dev/dynamodb.yaml
 
 parameters:
   Env: "{{ var.env }}"
-  BatchRepositoryName: !stack_output dev/ecr.yaml::BatchRepositoryName
-  MarpleRepositoryName: !stack_output dev/ecr.yaml::MarpleRepositoryName
-  EcrImageTag: !stack_attr sceptre_user_data.ecr.tag
+  # Digest-pinned image URIs selected before deployment.
+  BatchImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/images/batch
+  MarpleImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/images/marple
   DataBucketName: !stack_output dev/s3.yaml::DataBucketName
   OpenSearchImage: public.ecr.aws/opensearchproject/opensearch:2.17.1
   DataCiteCredentialsSecretArn: "{{ var.datacite_credentials_secret_arn }}"
+  DatasetReleasesTableArn: !stack_output dev/dynamodb.yaml::DatasetReleasesTableArn
 
 capabilities:
   - CAPABILITY_IAM
-  - CAPABILITY_NAMED_IAM

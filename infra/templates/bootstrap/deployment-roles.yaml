@@ -1,0 +1,289 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Deployment roles for COMET'
+
+# This stack is deployed manually.
+
+Parameters:
+  Env:
+    Type: String
+
+  BoundaryArn:
+    Type: String
+
+  CodeConnectionArn:
+    Type: String
+
+  SsmPrefix:
+    Type: String
+
+  TemplateBucketName:
+    Type: String
+
+Resources:
+  # CloudFormation assumes this role to provision environment stacks.
+  DeploymentServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: !Sub '/comet/bootstrap/${Env}/cloudformation/'
+      Description: 'CloudFormation service role for COMET environment stacks'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'cloudformation.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'provisioning'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+              # Read-only discovery actions.
+              - Sid: 'DiscoveryActions'
+                Effect: 'Allow'
+                Action:
+                  - 'autoscaling:Describe*'
+                  - 'batch:Describe*'
+                  - 'batch:List*'
+                  - 'budgets:ViewBudget'
+                  - 'cloudwatch:Describe*'
+                  - 'dynamodb:Describe*'
+                  - 'ecr:Describe*'
+                  - 'ecs:DeregisterTaskDefinition'
+                  - 'ecs:Describe*'
+                  - 'ecs:List*'
+                  - 'logs:Describe*'
+                  - 'rds:Describe*'
+                  - 'rds:List*'
+                  - 'secretsmanager:GetRandomPassword'
+                  - 'sns:Get*'
+                  - 'sns:List*'
+                Resource: '*'
+
+              # These services embed generated IDs in their ARNs, so they cannot be scoped
+              # to environment-named resources.
+              - Sid: 'UnscopedProvisioningActions'
+                Effect: 'Allow'
+                Action:
+                  - 'codestar-notifications:*'
+                  - 'ec2:*'
+                  - 'route53:*'
+                  - 'servicediscovery:*'
+                Resource: '*'
+
+              # Workload actions scoped to environment resources and the configured connection.
+              - Sid: 'EnvironmentProvisioningActions'
+                Effect: 'Allow'
+                Action:
+                  - 'autoscaling:*'
+                  - 'batch:*'
+                  - 'budgets:*'
+                  - 'cloudwatch:*'
+                  - 'codebuild:*'
+                  - 'codeconnections:PassConnection'
+                  - 'codestar-connections:PassConnection'
+                  - 'codepipeline:*'
+                  - 'dynamodb:*'
+                  - 'ecr:*'
+                  - 'ecs:*'
+                  - 'events:*'
+                  - 'lambda:*'
+                  - 'logs:*'
+                  - 'rds:*'
+                  - 's3:*'
+                  - 'secretsmanager:*'
+                  - 'sns:*'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:compute-environment/*'
+                  - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:job-queue/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:budget/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/comet-${Env}-*/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/comet-${Env}-*:*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/comet-${Env}-*/*'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:subgrp:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:comet-${Env}-*'
+                  - !Ref CodeConnectionArn
+
+        - PolicyName: 'iam'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+              # Manage environment IAM resources and pass workload roles to the listed services.
+              - Sid: 'ManageWorkloadIam'
+                Effect: 'Allow'
+                Action: 'iam:*'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/comet/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/comet/${Env}/*'
+              - Sid: 'PassWorkloadRoles'
+                Effect: 'Allow'
+                Action: 'iam:PassRole'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/bootstrap/${Env}/runner/*'
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService':
+                      - 'codebuild.amazonaws.com'
+                      - 'codepipeline.amazonaws.com'
+                      - 'ec2.amazonaws.com'
+                      - 'ecs-tasks.amazonaws.com'
+                      - 'lambda.amazonaws.com'
+              - Sid: 'CreateServiceLinkedRoles'
+                Effect: 'Allow'
+                Action: 'iam:CreateServiceLinkedRole'
+                Resource: '*'
+
+              # Require the workload boundary and protect bootstrap, user, and account administration.
+              - Sid: 'EnforceWorkloadBoundary'
+                Effect: 'Deny'
+                Action:
+                  - 'iam:AttachRolePolicy'
+                  - 'iam:CreateRole'
+                  - 'iam:PutRolePermissionsBoundary'
+                  - 'iam:PutRolePolicy'
+                Resource: '*'
+                Condition:
+                  StringNotEquals:
+                    'iam:PermissionsBoundary': !Ref BoundaryArn
+              - Sid: 'ProtectBootstrapIam'
+                Effect: 'Deny'
+                NotAction: 'iam:PassRole'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/comet/bootstrap/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/bootstrap/${Env}/*'
+              - Sid: 'ProtectUserAndAccountAdministration'
+                Effect: 'Deny'
+                Action:
+                  - 'account:*'
+                  - 'iam:AttachUserPolicy'
+                  - 'iam:CreateAccessKey'
+                  - 'iam:CreateUser'
+                  - 'iam:DeleteRolePermissionsBoundary'
+                  - 'iam:PutUserPolicy'
+                  - 'organizations:*'
+                Resource: '*'
+
+  # Runs Sceptre and Airflow migrations, delegating stack changes to CloudFormation.
+  DeploymentRunnerRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Path: !Sub '/comet/bootstrap/${Env}/runner/'
+      Description: 'Runs Sceptre and delegates COMET provisioning to CloudFormation'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'codebuild.amazonaws.com'
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+              ArnEquals:
+                'aws:SourceArn': !Sub 'arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/comet-${Env}-deploy'
+      Policies:
+        - PolicyName: 'deploy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+              # Actions share this statement because IAM evaluates each against its applicable resource types.
+              - Sid: 'DeploymentSupportActions'
+                Effect: 'Allow'
+                Action:
+                  - 'cloudformation:CancelUpdateStack'
+                  - 'cloudformation:Describe*'
+                  - 'cloudformation:Get*'
+                  - 'cloudformation:List*'
+                  - 'codeconnections:GetConnection'
+                  - 'codeconnections:GetConnectionToken'
+                  - 'ecs:DescribeTasks'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 's3:Get*'
+                  - 's3:ListBucket'
+                  - 's3:PutObject'
+                  - 'ssm:GetParameter*'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/comet-${Env}-*/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/comet-${Env}-airflow*/*'
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/codebuild/deploy:*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${TemplateBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${TemplateBucketName}/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter/aws/service/ami-*'
+                  - !Ref CodeConnectionArn
+
+              # Stack changes must use the CloudFormation service role.
+              - Sid: 'ManageEnvironmentStacks'
+                Effect: 'Allow'
+                Action:
+                  - 'cloudformation:CreateStack'
+                  - 'cloudformation:DeleteStack'
+                  - 'cloudformation:UpdateStack'
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/comet-${Env}-*/*'
+                Condition:
+                  StringEquals:
+                    'cloudformation:RoleArn': !GetAtt DeploymentServiceRole.Arn
+              - Sid: 'ValidateTemplates'
+                Effect: 'Allow'
+                Action: 'cloudformation:ValidateTemplate'
+                Resource: '*'
+
+              # Sceptre resolves !stack_output_external references at deploy time.
+              - Sid: 'ResolveExternalStackOutputs'
+                Effect: 'Allow'
+                Action: 'cloudformation:DescribeStacks'
+                Resource: '*'
+
+              # Delegate stack deployment to CloudFormation and Airflow migrations to ECS.
+              - Sid: 'PassDeploymentServiceRole'
+                Effect: 'Allow'
+                Action: 'iam:PassRole'
+                Resource: !GetAtt DeploymentServiceRole.Arn
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService': 'cloudformation.amazonaws.com'
+              - Sid: 'RunAirflowMigrations'
+                Effect: 'Allow'
+                Action: 'ecs:RunTask'
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/comet-${Env}-airflow-init:*'
+                Condition:
+                  ArnLike:
+                    'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/comet-${Env}-airflow*'
+              - Sid: 'PassAirflowServiceRoles'
+                Effect: 'Allow'
+                Action: 'iam:PassRole'
+                Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/${Env}/airflow/service/*'
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService': 'ecs-tasks.amazonaws.com'
+
+
+Outputs:
+  ServiceRoleArn:
+    Description: 'Set as cloudformation_service_role_arn in vars-<env>.yaml'
+    Value: !GetAtt DeploymentServiceRole.Arn
+
+  RunnerRoleArn:
+    Description: 'Set as deployment_runner_role_arn in vars-<env>.yaml'
+    Value: !GetAtt DeploymentRunnerRole.Arn

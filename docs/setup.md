@@ -21,43 +21,140 @@ export AWS_PROFILE=<your-sso-profile>
 aws sso login
 ```
 
-Then export the ECR registry, default region, and path to the `arxiv-tex-extract` checkout:
+Then export the ECR registry and default region:
 
 ```bash
 export ECR_REGISTRY=<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
 export AWS_DEFAULT_REGION=us-east-1
-export ARXIV_TEX_EXTRACT_PATH=/path/to/arxiv-tex-extract
 ```
 
 ## AWS account prerequisites
 
-Before deploying the monitoring stacks, enable resource tags for telemetry in the COMET AWS account. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
+COMET uses a shared VPC, public subnet, and route table created outside this repository. You also need an S3 bucket for CloudFormation templates and a GitHub connection in **Developer Tools → Settings → Connections**. Create and authorize the connection, and confirm that its status is **Available**. Record the stack outputs, bucket name, connection ARN, and GitHub repository ID in `vars-dev.yaml` during the [first deployment](#first-deployment).
+
+Create the [DataCite credentials](#datacite-credentials) and [Airflow Fernet key](#rotating-the-fernet-key) in Secrets Manager before deploying. Use the default `aws/secretsmanager` encryption key for both. The COMET roles do not have permission to decrypt customer-managed KMS keys.
+
+Enable resource tags for telemetry in the COMET AWS account before deploying the monitoring stacks. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
+
+## Deployment permissions
+
+`make bootstrap` creates three resources used by later deployments:
+
+* The CodeBuild runner role reads the deployment inputs, creates, updates, and deletes only `comet-<env>-*` CloudFormation stacks through the service role, reads the external stack outputs used by the configuration, and runs the Airflow database migration task.
+* The CloudFormation service role has broad permissions to create and update the AWS resources used by the environment. Any IAM role it creates must have the COMET permissions boundary. It cannot create IAM users or access keys or change the roles and policies created by `make bootstrap`.
+* The permissions boundary is attached to every IAM role created by the environment stacks, including roles for services, jobs, builds, and monitoring. Both a role's own policy and the boundary must allow an action. The boundary permits the environment's resources and the AWS read, monitoring, and Systems Manager or ECS agent calls needed to run them.
+
+CloudFormation assigns names to the roles and policies. Their IAM paths remain under `/comet/bootstrap/<env>/` or `/comet/<env>/<component>/`, so policies can match an environment's resources without depending on generated names. `make launch` does not update the bootstrap stacks; run `make bootstrap` again when these deployment permissions change.
+
+## First deployment
+
+1. Copy the example variables file:
+
+   ```bash
+   cp vars-dev.yaml.example vars-dev.yaml
+   ```
+
+2. Fill in the environment settings and every placeholder except the three bootstrap outputs. This includes the template bucket, SSM prefix, shared network stack outputs, alert addresses, GitHub connection, repository, and secret ARNs. Leave `permissions_boundary_arn`, `cloudformation_service_role_arn`, and `deployment_runner_role_arn` empty for now. `Environment` and `Service` are added to the stack tags by Sceptre.
+3. Using credentials that can create IAM roles and managed policies, create the deployment permissions:
+
+   ```bash
+   make bootstrap
+   ```
+
+4. Copy the stack outputs into `vars-dev.yaml`:
+
+   * `BoundaryArn` → `permissions_boundary_arn`
+   * `ServiceRoleArn` → `cloudformation_service_role_arn`
+   * `RunnerRoleArn` → `deployment_runner_role_arn`
+
+5. Store the completed variables file in Parameter Store for the deploy project:
+
+   ```bash
+   make sync-vars
+   ```
+
+6. Deploy the image-build pipeline and deploy project. Sceptre also launches the ECR, S3, and monitoring alert stacks required by the build pipeline:
+
+   ```bash
+   make launch STACK=build-pipeline.yaml
+   make launch STACK=deploy.yaml
+   ```
+
+7. Push a commit to `main`, or start the main image-build pipeline in CodePipeline, to build the first image set. When the build finishes, select its `sha-*` tag with `make promote SOURCE_TAG=<tag>`.
+8. Preview and deploy the remaining stacks:
+
+   ```bash
+   make diff
+   make launch
+   ```
+
+## Image builds and releases
+
+The path from a commit to running stacks:
+
+```mermaid
+flowchart LR
+    subgraph build["Build and release"]
+        main["push to main"] --> bp["build pipeline<br/>buildspec.yaml, build mode"]
+        vtag["push tag v0.1.0"] --> rp["release pipeline<br/>buildspec.yaml, release mode"]
+        bp -->|"push images tagged sha-98dea10"| ecr["ECR"]
+        rp -->|"add tag 0.1.0 to existing images"| ecr
+    end
+
+    subgraph promote["Promote"]
+        pm["make promote SOURCE_TAG=0.1.0"]
+    end
+    ecr -->|"resolve tag to digests"| pm
+    pm -->|"digest URIs"| img["SSM images/batch, marple, airflow"]
+
+    subgraph deploy["Deploy"]
+        vars["vars-dev.yaml"] -->|"make sync-vars"| varsp["SSM vars-dev.yaml"]
+        start["start comet-dev-deploy in CodeBuild console"] --> ds["buildspec-deploy.yaml<br/>runs as DeploymentRunnerRole"]
+        varsp --> ds
+        ds -->|"make launch"| cfn["CloudFormation with<br/>DeploymentServiceRole"]
+    end
+    img --> cfn
+```
+
+Pushing to `main` runs the build pipeline, which builds the three images sequentially and tags them with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release pipeline, which adds `0.1.0` to those existing images without rebuilding them. The release fails if the commit was not built first.
+
+Release tags are retained. ECR retains the latest 50 `sha-*` builds and the latest three untagged images.
+
+The pipeline uses the GitHub connection and `codebuild_image` configured during the [first deployment](#first-deployment).
 
 ## Deploying dev stacks
 
-Preview changes:
+Deployments use image digest URIs stored in three SSM parameters:
+
+- `<ssm_prefix>/dev/images/batch`
+- `<ssm_prefix>/dev/images/marple`
+- `<ssm_prefix>/dev/images/airflow`
+
+Select an image set by tag. The command checks all three repositories before updating the parameters:
 
 ```bash
-make diff-dev
+make promote SOURCE_TAG=0.1.0       # release
+make promote SOURCE_TAG=sha-98dea10 # unreleased main build
 ```
 
-Build, push, and deploy all dev stacks:
+Custom local tags also work if all three images were pushed with the same tag. Unreleased SHA builds are not protected from ECR cleanup.
 
-```bash
-make deploy-dev
-```
+Preview or launch locally with `make diff` and `make launch`. Use `STACK=<stack>.yaml` to target one stack.
+
+To deploy without a workstation checkout, open the `comet-dev-deploy` project in the CodeBuild console and choose **Start build** without environment overrides. The project clones `main`, fetches `vars-dev.yaml` from Parameter Store, and launches Sceptre. It does not change the image parameters.
+
+Run `make sync-vars` whenever `vars-dev.yaml` changes so the deploy project receives the new settings.
+
+The `push-*` targets (`push-batch`, `push-marple`, `push-airflow`, or `push-all`) build and push images locally. Image tags are immutable, so uncommitted work needs an override, for example `make push-all IMAGE_TAG=jamie-test-1`.
 
 ### Airflow image
 
 Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the Amazon provider installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
 
 ```bash
-make build-airflow         # build comet-airflow:<version> and :latest
-make push-airflow-dev      # push to ECR and record the image digest in SSM
-make deploy-airflow-dev    # build, push, and roll the services
+make build-airflow         # build the image locally
+make push-airflow          # push to ECR tagged with IMAGE_TAG
 ```
-
-`push-airflow-dev` stores the image's sha256 digest URI in SSM. The Airflow stack reads this value, so a new digest updates the task definition and rolls the services. Set `SSM_PREFIX` to the same value as `ssm_prefix` in `vars-dev.yaml`. `make deploy-airflow-dev` and `make deploy-dev` create the parameter before launching the stack.
 
 To bump the Airflow version, edit `AIRFLOW_VERSION` in `versions.env`, then:
 
@@ -66,7 +163,7 @@ make bump-airflow
 uv run --locked --extra airflow --extra dev pytest
 ```
 
-Then commit `versions.env`, `pyproject.toml`, and `uv.lock` together, and run `make deploy-airflow-dev`.
+Commit `versions.env`, `pyproject.toml`, and `uv.lock` together. The main pipeline builds the new image set; promote its SHA or a subsequent release tag before launching the Airflow services.
 
 `make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or extras, edit the target before running it.
 
@@ -85,7 +182,7 @@ These objects must exist before running the DataCite enrichment DAGs. Infrastruc
 
 Configure the DataCite account ID and password in two places: Secrets Manager for the `download-datacite` Batch job and an Airflow connection for the `datacite_ingest` DAG.
 
-For the Batch job, create an "other type of secret" with `account_id` and `password` keys. Name it `comet-<env>-batch-datacite-credentials` and set its ARN as `datacite_credentials_secret_arn` in `vars-dev.yaml`.
+For the Batch job, create an "other type of secret" with `account_id` and `password` keys. Name it `comet-<env>-batch-datacite-credentials`, leave encryption on the default `aws/secretsmanager` key, and set its ARN as `datacite_credentials_secret_arn` in `vars-dev.yaml`.
 
 For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui)), go to Admin → Connections, and add a connection with these fields:
 
@@ -102,17 +199,17 @@ Airflow stores the connection in its metadata database and encrypts it with the 
 
 ### Stack status and deletion
 
-Show the status of all dev stacks, or one stack. `STACK` takes the full config path:
+Show the status of all dev stacks, or one stack. `STACK` is the config path relative to the environment:
 
 ```bash
-make status-dev
-make status-dev STACK=dev/ec2.yaml
+make status
+make status STACK=ec2.yaml
 ```
 
 Delete a stack. `STACK` is required; sceptre asks for confirmation before deleting:
 
 ```bash
-make delete-dev STACK=dev/ec2.yaml
+make delete STACK=ec2.yaml
 ```
 
 ### Templates
@@ -129,7 +226,7 @@ make dev-status    # show desired capacity, instance ID, and suspended processes
 make dev-down      # terminate the instance
 ```
 
-After changing the AMI, instance type, or launch template, run `make launch-dev STACK=ec2.yaml` to update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current instance, run `make dev-refresh`, which replaces it with one using the new configuration.
+After changing the AMI, instance type, or launch template, run `make launch STACK=ec2.yaml` to update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current instance, run `make dev-refresh`, which replaces it with one using the new configuration.
 
 A scheduled action sets the desired capacity to zero each night, preventing forgotten instances from continuing to run. The hour and time zone come from `instance_shutdown_hour` and `instance_shutdown_timezone` in `vars-dev.yaml`. For work that must run overnight, use `make dev-keepalive` to disable the nightly shutdown schedule. Run `make dev-autostop` to re-enable it. Re-enabling the schedule does not trigger a missed shutdown, so if you re-enable it after the scheduled shutdown time, the instance will continue running until the following night.
 
@@ -163,11 +260,11 @@ Generate a key with:
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-One-time setup: create the secret in the Secrets Manager console with a generated key as its value and the description `Airflow Fernet key that encrypts connections and variables stored in the metadata DB (AIRFLOW__CORE__FERNET_KEY)`, then put its ARN into `vars-dev.yaml` as `fernet_secret_arn`.
+One-time setup: create the secret in the Secrets Manager console with a generated key as its value and the description `Airflow Fernet key that encrypts connections and variables stored in the metadata DB (AIRFLOW__CORE__FERNET_KEY)`. Leave encryption on the default `aws/secretsmanager` key, then put its ARN into `vars-dev.yaml` as `fernet_secret_arn`.
 
 To rotate, in the Secrets Manager console:
 
-1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with `sceptre --dir infra launch dev/airflow-services.yaml` (its hook runs the init task, which re-encrypts everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by hand.
+1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with `make launch STACK=airflow-services.yaml` (its hook runs the init task, which re-encrypts everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by hand.
 2. Once it succeeds, set the value to just `<new key>` and run it again.
 
 Don't do step 2 until step 1's deploy is healthy: while the value is `new,old`, Airflow encrypts with the new key and decrypts with either, so a partial re-encrypt is safe; dropping the old key early would orphan rows not yet re-encrypted.

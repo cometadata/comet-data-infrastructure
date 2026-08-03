@@ -5,16 +5,12 @@ Parameters:
   Env:
     Type: String
 
-  # ECR repo names from the ecr stack.
-  BatchRepositoryName:
+  # Digest-pinned image URIs from SSM.
+  BatchImage:
     Type: String
 
-  MarpleRepositoryName:
+  MarpleImage:
     Type: String
-
-  EcrImageTag:
-    Type: String
-    Default: latest
 
   DataBucketName:
     Type: String
@@ -26,6 +22,9 @@ Parameters:
 
   # Secrets Manager secret with DataCite credentials (created out-of-band).
   DataCiteCredentialsSecretArn:
+    Type: String
+
+  DatasetReleasesTableArn:
     Type: String
 
 Resources:
@@ -41,7 +40,8 @@ Resources:
   BatchJobRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      RoleName: !Sub 'comet-${Env}-batch-job-role'
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/batch/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -49,8 +49,6 @@ Resources:
             Principal:
               Service: 'ecs-tasks.amazonaws.com'
             Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
       Policies:
         - PolicyName: 'CometDataBucketS3Policy'
           PolicyDocument:
@@ -65,12 +63,25 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:s3:::${DataBucketName}'
                   - !Sub 'arn:aws:s3:::${DataBucketName}/*'
+        - PolicyName: 'CometDatasetReleasesDynamoDbPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:UpdateItem'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:Scan'
+                Resource: !Ref DatasetReleasesTableArn
 
   # Lets ECS inject the DataCite secret.
   DataCiteJobExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      RoleName: !Sub 'comet-${Env}-batch-datacite-execution-role'
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/batch/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -88,7 +99,6 @@ Resources:
               - Effect: 'Allow'
                 Action:
                   - 'secretsmanager:GetSecretValue'
-                  - 'kms:Decrypt'
                 Resource: !Ref DataCiteCredentialsSecretArn
 
   # download-datacite: command overriden by BatchOperator.
@@ -100,7 +110,7 @@ Resources:
       PlatformCapabilities:
         - 'EC2'
       ContainerProperties:
-        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+        Image: !Ref BatchImage
         Vcpus: 1
         Memory: 2048
         JobRoleArn: !GetAtt BatchJobRole.Arn
@@ -138,7 +148,7 @@ Resources:
       PlatformCapabilities:
         - 'EC2'
       ContainerProperties:
-        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+        Image: !Ref BatchImage
         Vcpus: 1
         Memory: 2048
         JobRoleArn: !GetAtt BatchJobRole.Arn
@@ -212,7 +222,7 @@ Resources:
                     awslogs-region: !Ref AWS::Region
                     awslogs-stream-prefix: enrich-with-ror
               - Name: marple
-                Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MarpleRepositoryName}:${EcrImageTag}'
+                Image: !Ref MarpleImage
                 Essential: false
                 DependsOn:
                   - ContainerName: opensearch
@@ -243,7 +253,7 @@ Resources:
                     awslogs-region: !Ref AWS::Region
                     awslogs-stream-prefix: enrich-with-ror
               - Name: main
-                Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+                Image: !Ref BatchImage
                 Essential: true
                 DependsOn:
                   - ContainerName: marple
