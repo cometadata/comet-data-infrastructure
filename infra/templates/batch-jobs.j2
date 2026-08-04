@@ -5,16 +5,12 @@ Parameters:
   Env:
     Type: String
 
-  # ECR repo names from the ecr stack.
-  BatchRepositoryName:
+  # Digest-pinned image URIs from SSM.
+  BatchImage:
     Type: String
 
-  MarpleRepositoryName:
+  MarpleImage:
     Type: String
-
-  EcrImageTag:
-    Type: String
-    Default: latest
 
   DataBucketName:
     Type: String
@@ -100,7 +96,7 @@ Resources:
       PlatformCapabilities:
         - 'EC2'
       ContainerProperties:
-        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+        Image: !Ref BatchImage
         Vcpus: 1
         Memory: 2048
         JobRoleArn: !GetAtt BatchJobRole.Arn
@@ -138,7 +134,7 @@ Resources:
       PlatformCapabilities:
         - 'EC2'
       ContainerProperties:
-        Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+        Image: !Ref BatchImage
         Vcpus: 1
         Memory: 2048
         JobRoleArn: !GetAtt BatchJobRole.Arn
@@ -212,7 +208,7 @@ Resources:
                     awslogs-region: !Ref AWS::Region
                     awslogs-stream-prefix: enrich-with-ror
               - Name: marple
-                Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MarpleRepositoryName}:${EcrImageTag}'
+                Image: !Ref MarpleImage
                 Essential: false
                 DependsOn:
                   - ContainerName: opensearch
@@ -243,7 +239,7 @@ Resources:
                     awslogs-region: !Ref AWS::Region
                     awslogs-stream-prefix: enrich-with-ror
               - Name: main
-                Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchRepositoryName}:${EcrImageTag}'
+                Image: !Ref BatchImage
                 Essential: true
                 DependsOn:
                   - ContainerName: marple

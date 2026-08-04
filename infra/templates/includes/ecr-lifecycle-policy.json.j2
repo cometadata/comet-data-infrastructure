@@ -1,31 +1,29 @@
 {
   "rules": [
     {
+      "rulePriority": 1,
+      "description": "Retain the newest 50 sha-tagged builds",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["sha-"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 50
+      },
       "action": {
         "type": "expire"
-      },
-      "selection": {
-        "countType": "imageCountMoreThan",
-        "countNumber": 1,
-        "tagStatus": "tagged",
-        "tagPrefixList": [
-          "latest"
-        ]
-      },
-      "description": "Ensure that we do not have more than 1 tagged version",
-      "rulePriority": 1
+      }
     },
     {
+      "rulePriority": 2,
+      "description": "Retain the newest 3 untagged images",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "imageCountMoreThan",
+        "countNumber": 3
+      },
       "action": {
         "type": "expire"
-      },
-      "selection": {
-        "countType": "imageCountMoreThan",
-        "countNumber": {{ untagged_keep }},
-        "tagStatus": "untagged"
-      },
-      "description": "Only retain the last {{ untagged_keep }} untagged versions",
-      "rulePriority": 2
+      }
     }
   ]
 }

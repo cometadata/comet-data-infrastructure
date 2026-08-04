@@ -1,0 +1,24 @@
+template:
+  path: build-pipeline.j2
+  type: file
+
+dependencies:
+  - dev/monitoring/alerts.yaml
+  - dev/ecr.yaml
+  - dev/s3.yaml
+
+parameters:
+  Env: "{{ var.env }}"
+  CodeBuildImage: "{{ var.codebuild_image }}"
+  CodeConnectionArn: "{{ var.code_connection_arn }}"
+  RepositoryId: "{{ var.github_repository_id }}"
+  BatchRepositoryArn: !stack_output dev/ecr.yaml::BatchRepositoryArn
+  MarpleRepositoryArn: !stack_output dev/ecr.yaml::MarpleRepositoryArn
+  AirflowRepositoryArn: !stack_output dev/ecr.yaml::AirflowRepositoryArn
+  BuildCacheRepositoryArn: !stack_output dev/ecr.yaml::BuildCacheRepositoryArn
+  ArtifactBucketName: !stack_output dev/s3.yaml::ArtifactBucketName
+  ArtifactBucketArn: !stack_output dev/s3.yaml::ArtifactBucketARN
+  AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
+
+capabilities:
+  - CAPABILITY_IAM

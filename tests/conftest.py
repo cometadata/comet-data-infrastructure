@@ -20,7 +20,6 @@ STUB_USER_DATA = {
     },
     "vpc_id": "vpc-00000000",
     "public_subnet": "subnet-00000000",
-    "ecr": {"name": "comet-dev", "tag": "latest"},
     "alert_emails": ["alerts@example.org"],
 }
 

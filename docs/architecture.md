@@ -78,21 +78,20 @@ The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image laye
 
 ## Container images
 
-| Image           | Built from           | Runs on                                                                  |
-|-----------------|----------------------|--------------------------------------------------------------------------|
-| `comet`         | `Dockerfile`         | Dev EC2 instance (arXiv pipeline; includes arxiv-tex-extract and DuckDB) |
-| `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs (comet package + `comet-enrich`)                          |
-| `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs                             |
-| `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers                                     |
+| Image           | Built from           | Runs on                                                                                              |
+|-----------------|----------------------|------------------------------------------------------------------------------------------------------|
+| `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs and the dev EC2 arXiv pipeline (`comet-enrich`, `latex-extract`, and DuckDB included) |
+| `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs                                                         |
+| `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers                                                                 |
 
-Images are stored in ECR. The Airflow image is pinned by its sha256 digest, which is stored in SSM. Pushing a new image changes the task definition, which makes ECS redeploy the services.
+Images are stored in ECR and selected for deployment by sha256 digest in SSM. Main builds use `sha-*` tags; a release tag labels the existing images without rebuilding them. See [setup.md](setup.md#image-builds-and-releases) for the build and deployment procedure.
 
 ## Monitoring and cost alerts
 
 ### Alarms
 
 * CloudWatch Logs: alarm when log ingestion exceeds the per-five-minute byte threshold in at least two of the last four periods.
-* S3: alarm when combined storage across the three project buckets exceeds the configured threshold.
+* S3: alarm when combined storage across the four project buckets exceeds the configured threshold.
 * RDS: forward low-storage and configuration-change events to the monitoring SNS topic.
 * EC2 and Fargate worker tasks:
   * Alarm when tasks exceeds the age threshold for two consecutive five-minute periods.
@@ -115,7 +114,7 @@ Monitoring notifications are delivered to every address in the `alert_emails` li
 
 Things to consider before using this stack in production:
 
-* Use CodePipeline and CodeBuild to automatically build the Docker images and deploy updates.
+* Add a dedicated CloudFormation service role and reduce the deploy project's direct permissions.
 * Subscribe the monitoring alerts SNS topic to Slack.
 * Enable Container Insights on the ECS cluster for per-task CPU/memory metrics.
 * Could enable UI access via an internal ALB with SSO.

@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'CodeBuild project that deploys an environment with Sceptre on demand'
+
+Parameters:
+  Env:
+    Type: String
+
+  # CodeConnections connection to GitHub, created and authorised outside CloudFormation.
+  CodeConnectionArn:
+    Type: String
+
+  # GitHub repository in owner/name form.
+  RepositoryId:
+    Type: String
+
+  BranchName:
+    Type: String
+    Default: 'main'
+
+  # SSM Parameter Store path prefix; must match ssm_prefix in vars-dev.yaml.
+  SsmPrefix:
+    Type: String
+
+  TemplateBucketName:
+    Type: String
+
+  CodeBuildImage:
+    Type: String
+
+  DeployTimeoutMinutes:
+    Type: Number
+    Default: 120
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+Resources:
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/codebuild/deploy'
+      RetentionInDays: !Ref LogRetentionDays
+
+  DeployRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'codebuild.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'DeployBasePolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !GetAtt LogGroup.Arn
+                  - !Sub '${LogGroup.Arn}:*'
+              - Effect: 'Allow'
+                Action: 'codestar-connections:UseConnection'
+                Resource: !Ref CodeConnectionArn
+              - Effect: 'Allow'
+                Action:
+                  - 'ssm:GetParameter'
+                  - 'ssm:GetParameters'
+                  - 'ssm:GetParametersByPath'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/${Env}/*'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetBucketLocation'
+                  - 's3:ListBucket'
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${TemplateBucketName}'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${TemplateBucketName}/*'
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudformation:CancelUpdateStack'
+                  - 'cloudformation:ContinueUpdateRollback'
+                  - 'cloudformation:CreateStack'
+                  - 'cloudformation:DeleteStack'
+                  - 'cloudformation:SetStackPolicy'
+                  - 'cloudformation:UpdateStack'
+                  - 'cloudformation:UpdateTerminationProtection'
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/comet-${Env}-*/*'
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudformation:CreateChangeSet'
+                  - 'cloudformation:DeleteChangeSet'
+                  - 'cloudformation:ExecuteChangeSet'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/comet-${Env}-*/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*/*'
+              - Effect: 'Allow'
+                Action:
+                  - 'cloudformation:Describe*'
+                  - 'cloudformation:Get*'
+                  - 'cloudformation:List*'
+                  - 'cloudformation:ValidateTemplate'
+                Resource: '*'
+
+  DeploymentIamPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: 'DeploymentIamPolicy'
+      Roles: [ !Ref DeployRole ]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 'iam:AddRoleToInstanceProfile'
+              - 'iam:AttachRolePolicy'
+              - 'iam:CreateInstanceProfile'
+              - 'iam:CreatePolicy'
+              - 'iam:CreatePolicyVersion'
+              - 'iam:CreateRole'
+              - 'iam:DeleteInstanceProfile'
+              - 'iam:DeletePolicy'
+              - 'iam:DeletePolicyVersion'
+              - 'iam:DeleteRole'
+              - 'iam:DeleteRolePolicy'
+              - 'iam:DetachRolePolicy'
+              - 'iam:GetInstanceProfile'
+              - 'iam:GetPolicy'
+              - 'iam:GetPolicyVersion'
+              - 'iam:GetRole'
+              - 'iam:GetRolePolicy'
+              - 'iam:ListAttachedRolePolicies'
+              - 'iam:ListInstanceProfilesForRole'
+              - 'iam:ListInstanceProfileTags'
+              - 'iam:ListPolicyTags'
+              - 'iam:ListPolicyVersions'
+              - 'iam:ListRolePolicies'
+              - 'iam:ListRoleTags'
+              - 'iam:PutRolePolicy'
+              - 'iam:RemoveRoleFromInstanceProfile'
+              - 'iam:SetDefaultPolicyVersion'
+              - 'iam:TagInstanceProfile'
+              - 'iam:TagPolicy'
+              - 'iam:TagRole'
+              - 'iam:UntagInstanceProfile'
+              - 'iam:UntagPolicy'
+              - 'iam:UntagRole'
+              - 'iam:UpdateAssumeRolePolicy'
+              - 'iam:UpdateRole'
+              - 'iam:UpdateRoleDescription'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/comet-${Env}-*'
+          - Effect: 'Allow'
+            Action: 'iam:PassRole'
+            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet-${Env}-*'
+            Condition:
+              StringEquals:
+                iam:PassedToService:
+                  - 'batch.amazonaws.com'
+                  - 'codebuild.amazonaws.com'
+                  - 'codepipeline.amazonaws.com'
+                  - 'ec2.amazonaws.com'
+                  - 'ecs-tasks.amazonaws.com'
+                  - 'lambda.amazonaws.com'
+
+  DeployProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      Description: 'Runs Sceptre using the image digests currently stored in SSM'
+      ServiceRole: !GetAtt DeployRole.Arn
+      ConcurrentBuildLimit: 1
+      QueuedTimeoutInMinutes: 60
+      TimeoutInMinutes: !Ref DeployTimeoutMinutes
+      Artifacts:
+        Type: 'NO_ARTIFACTS'
+      Source:
+        Type: 'GITHUB'
+        Location: !Sub 'https://github.com/${RepositoryId}.git'
+        GitCloneDepth: 1
+        BuildSpec: 'buildspec-deploy.yaml'
+        Auth:
+          Type: 'CODECONNECTIONS'
+          Resource: !Ref CodeConnectionArn
+      SourceVersion: !Ref BranchName
+      Environment:
+        Type: 'LINUX_CONTAINER'
+        ComputeType: 'BUILD_GENERAL1_SMALL'
+        Image: !Ref CodeBuildImage
+        HostKernel: 'LINUX_KERNEL_6'
+        ImagePullCredentialsType: 'CODEBUILD'
+        EnvironmentVariables:
+          - Name: 'SSM_PREFIX'
+            Value: !Ref SsmPrefix
+          - Name: 'ENV'
+            Value: !Ref Env
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Ref LogGroup
+          Status: 'ENABLED'

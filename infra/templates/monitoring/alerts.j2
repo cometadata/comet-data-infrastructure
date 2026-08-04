@@ -21,6 +21,7 @@ Resources:
               Service:
                 - cloudwatch.amazonaws.com
                 - events.rds.amazonaws.com
+                - codestar-notifications.amazonaws.com
             Action: 'sns:Publish'
             Resource: !Ref AlertTopic
             Condition:

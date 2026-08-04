@@ -21,43 +21,63 @@ export AWS_PROFILE=<your-sso-profile>
 aws sso login
 ```
 
-Then export the ECR registry, default region, and path to the `arxiv-tex-extract` checkout:
+Then export the ECR registry and default region:
 
 ```bash
 export ECR_REGISTRY=<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
 export AWS_DEFAULT_REGION=us-east-1
-export ARXIV_TEX_EXTRACT_PATH=/path/to/arxiv-tex-extract
 ```
 
 ## AWS account prerequisites
 
 Before deploying the monitoring stacks, enable resource tags for telemetry in the COMET AWS account. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
 
+## Image builds and releases
+
+Pushing to `main` runs the build pipeline, which builds the three images sequentially and tags them with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release pipeline, which adds `0.1.0` to those existing images without rebuilding them. The release fails if the commit was not built first.
+
+Release tags are retained. ECR retains the latest 50 `sha-*` builds and the latest three untagged images.
+
+One-time setup:
+
+1. In the Developer Tools console, open **Settings → Connections** and create a connection to GitHub, completing the authorization handshake. Put its ARN into `vars-dev.yaml` as `code_connection_arn` and set `github_repository_id`.
+2. Set `codebuild_image` in `vars-dev.yaml` to `aws/codebuild/amazonlinux-x86_64-standard:6.0`.
+3. Run `make sync-vars`. This stores `vars-dev.yaml` at `<ssm_prefix>/dev/vars-dev.yaml` as a SecureString for the deploy project.
+4. Deploy the two stacks: `make launch STACK=build-pipeline.yaml` and `make launch STACK=deploy.yaml`.
+
+Run `make sync-vars` whenever `vars-dev.yaml` changes.
+
 ## Deploying dev stacks
 
-Preview changes:
+Deployments use image digest URIs stored in three SSM parameters:
+
+- `<ssm_prefix>/dev/images/batch`
+- `<ssm_prefix>/dev/images/marple`
+- `<ssm_prefix>/dev/images/airflow`
+
+Select an image set by tag. The command checks all three repositories before updating the parameters:
 
 ```bash
-make diff-dev
+make promote SOURCE_TAG=0.1.0       # release
+make promote SOURCE_TAG=sha-98dea10 # unreleased main build
 ```
 
-Build, push, and deploy all dev stacks:
+Custom local tags also work if all three images were pushed with the same tag. Unreleased SHA builds are not protected from ECR cleanup.
 
-```bash
-make deploy-dev
-```
+Preview or launch locally with `make diff` and `make launch`. Use `STACK=<stack>.yaml` to target one stack.
+
+To deploy without a workstation checkout, open the `comet-dev-deploy` project in the CodeBuild console and choose **Start build** without environment overrides. The project clones `main`, fetches `vars-dev.yaml` from Parameter Store, and launches Sceptre. It does not change the image parameters.
+
+The `push-*` targets (`push-batch`, `push-marple`, `push-airflow`, or `push-all`) build and push images locally. Image tags are immutable, so uncommitted work needs an override, for example `make push-all IMAGE_TAG=jamie-test-1`.
 
 ### Airflow image
 
 Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the Amazon provider installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
 
 ```bash
-make build-airflow         # build comet-airflow:<version> and :latest
-make push-airflow-dev      # push to ECR and record the image digest in SSM
-make deploy-airflow-dev    # build, push, and roll the services
+make build-airflow         # build the image locally
+make push-airflow          # push to ECR tagged with IMAGE_TAG
 ```
-
-`push-airflow-dev` stores the image's sha256 digest URI in SSM. The Airflow stack reads this value, so a new digest updates the task definition and rolls the services. Set `SSM_PREFIX` to the same value as `ssm_prefix` in `vars-dev.yaml`. `make deploy-airflow-dev` and `make deploy-dev` create the parameter before launching the stack.
 
 To bump the Airflow version, edit `AIRFLOW_VERSION` in `versions.env`, then:
 
@@ -66,7 +86,7 @@ make bump-airflow
 uv run --locked --extra airflow --extra dev pytest
 ```
 
-Then commit `versions.env`, `pyproject.toml`, and `uv.lock` together, and run `make deploy-airflow-dev`.
+Commit `versions.env`, `pyproject.toml`, and `uv.lock` together. The main pipeline builds the new image set; promote its SHA or a subsequent release tag before launching the Airflow services.
 
 `make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or extras, edit the target before running it.
 
@@ -167,7 +187,7 @@ One-time setup: create the secret in the Secrets Manager console with a generate
 
 To rotate, in the Secrets Manager console:
 
-1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with `sceptre --dir infra launch dev/airflow-services.yaml` (its hook runs the init task, which re-encrypts everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by hand.
+1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with `make launch STACK=airflow-services.yaml` (its hook runs the init task, which re-encrypts everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by hand.
 2. Once it succeeds, set the value to just `<new key>` and run it again.
 
 Don't do step 2 until step 1's deploy is healthy: while the value is `new,old`, Airflow encrypts with the new key and decrypts with either, so a partial re-encrypt is safe; dropping the old key early would orphan rows not yet re-encrypted.
