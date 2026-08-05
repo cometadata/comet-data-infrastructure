@@ -12,6 +12,7 @@ parameters:
   CodeBuildImage: "{{ var.codebuild_image }}"
   CodeConnectionArn: "{{ var.code_connection_arn }}"
   RepositoryId: "{{ var.github_repository_id }}"
+  BranchName: "feature/monitoring"
   BatchRepositoryArn: !stack_output dev/ecr.yaml::BatchRepositoryArn
   MarpleRepositoryArn: !stack_output dev/ecr.yaml::MarpleRepositoryArn
   AirflowRepositoryArn: !stack_output dev/ecr.yaml::AirflowRepositoryArn
