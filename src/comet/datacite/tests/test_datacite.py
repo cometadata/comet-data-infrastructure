@@ -106,6 +106,7 @@ class TestDownloadDatacite:
             download_datacite(
                 target_uri=target_uri,
                 datacite_bucket_name="datacite-source-bucket",
+                datacite_bucket_region="eu-west-1",
                 expected_file_count=expected_file_count,
                 expected_total_bytes=expected_total_bytes,
             )
@@ -121,6 +122,8 @@ class TestDownloadDatacite:
         assert cmd == [
             "s5cmd",
             "cp",
+            "--source-region",
+            "eu-west-1",
             "s3://datacite-source-bucket/dois/*.jsonl.gz",
             f"{download_dir}/",
         ]

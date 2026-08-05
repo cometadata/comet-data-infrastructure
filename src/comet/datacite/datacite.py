@@ -191,6 +191,7 @@ def download_datacite(
     *,
     target_uri: str,
     datacite_bucket_name: str,
+    datacite_bucket_region: str,
     expected_file_count: int,
     expected_total_bytes: int,
 ):
@@ -202,6 +203,7 @@ def download_datacite(
     Args:
         target_uri: S3 URI to upload the DataCite snapshot to (trailing slash).
         datacite_bucket_name: the name of the DataCite AWS S3 bucket.
+        datacite_bucket_region: AWS region of the DataCite bucket.
         expected_file_count: Expected number of .jsonl.gz files (from MANIFEST.json).
         expected_total_bytes: Expected total size of the .jsonl.gz files in bytes.
     """
@@ -220,6 +222,9 @@ def download_datacite(
             [
                 "s5cmd",
                 "cp",
+                # s5cmd cannot auto-detect the bucket region.
+                "--source-region",
+                datacite_bucket_region,
                 # Skip the per-month .csv.gz duplicates. s5cmd's `*` matches across `/`.
                 s3_uri(datacite_bucket_name, "dois/*.jsonl.gz"),
                 f"{ctx.download_dir}/",
