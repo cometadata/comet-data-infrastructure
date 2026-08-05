@@ -143,3 +143,6 @@ lint:
 
 lint-ci:
 > uv run --extra dev ruff check ./src ./dags
+
+test:
+> uv run --locked --extra airflow --extra dev pytest
