@@ -16,7 +16,7 @@ Parameters:
     Type: String
     Default: latest
 
-  S3BucketID:
+  DataBucketName:
     Type: String
 
   # Pin a version that matches Marple.
@@ -63,8 +63,8 @@ Resources:
                   - 's3:DeleteObject'
                   - 's3:ListBucket'
                 Resource:
-                  - !Sub 'arn:aws:s3:::${S3BucketID}'
-                  - !Sub 'arn:aws:s3:::${S3BucketID}/*'
+                  - !Sub 'arn:aws:s3:::${DataBucketName}'
+                  - !Sub 'arn:aws:s3:::${DataBucketName}/*'
 
   # Lets ECS inject the DataCite secret.
   DataCiteJobExecutionRole:

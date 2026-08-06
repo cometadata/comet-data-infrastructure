@@ -70,13 +70,13 @@ Resources:
               DaysAfterInitiation: 5
 
 Outputs:
-  S3BucketID:
+  DataBucketName:
     Value: !Ref S3Bucket
 
-  S3BucketURI:
+  DataBucketURI:
     Value: !Sub "s3://${S3Bucket}"
 
-  S3BucketARN:
+  DataBucketARN:
     Value: !GetAtt S3Bucket.Arn
 
   AirflowDagsBucketName:

@@ -21,7 +21,7 @@ parameters:
   DagsBucketArn: !stack_output dev/s3.yaml::AirflowDagsBucketARN
   LogsBucketName: !stack_output dev/s3.yaml::AirflowLogsBucketName
   LogsBucketArn: !stack_output dev/s3.yaml::AirflowLogsBucketARN
-  DataBucketArn: !stack_output dev/s3.yaml::S3BucketARN
+  DataBucketArn: !stack_output dev/s3.yaml::DataBucketARN
   DbCredentialsSecretArn: !stack_output dev/rds.yaml::DbCredentialsSecretArn
   # Created outside CloudFormation; see docs/airflow.md.
   FernetSecretArn: "{{ var.fernet_secret_arn }}"

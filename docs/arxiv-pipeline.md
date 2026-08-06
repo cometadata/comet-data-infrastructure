@@ -1,6 +1,12 @@
 # Running arXiv batch extraction on EC2
 
-SSH into the EC2 instance (e.g. via SSM), then pull and run the Docker
+Start the dev instance with `make dev-up` and get its instance ID from
+`make dev-status` (see [setup.md](setup.md)). For runs that go past the
+nightly shutdown, run `make dev-keepalive` first and
+`make dev-autostop` when the run is done: the shutdown terminates the
+instance, which wipes `/data` and the local resume state.
+
+Connect to the instance via SSM, then pull and run the Docker
 image. The `/data` directory is the NVMe mount on the instance; the
 pipeline writes under `/data/arxiv/<release-date>/` by default.
 

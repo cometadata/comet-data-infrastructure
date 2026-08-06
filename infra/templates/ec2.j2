@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 
-Description: 'An EC2 instance for development and testing'
+Description: 'An EC2 instance for development and testing, managed by an Auto Scaling Group'
 
 Parameters:
   ImageId:
@@ -9,7 +9,7 @@ Parameters:
   SubnetId:
     Type: 'AWS::EC2::Subnet::Id'
 
-  S3BucketID:
+  DataBucketName:
     Type: 'String'
 
   SecurityGroupId:
@@ -17,72 +17,120 @@ Parameters:
 
   InstanceType:
     Type: 'String'
-    Default: 'c5ad.large' # cheapest AMD instance with NVMe storage
+
+  ShutdownHour:
+    Type: 'Number'
+    Description: 'Hour of day (0-23) for the nightly scheduled shutdown'
+    MinValue: 0
+    MaxValue: 23
+
+  ShutdownTimeZone:
+    Type: 'String'
+    Description: 'IANA time zone for the nightly scheduled shutdown'
 
 Resources:
-  EC2Instance:
-    Type: 'AWS::EC2::Instance'
+  LaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
     Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-dev'
-      InstanceType: !Ref InstanceType
-      ImageId: !Ref ImageId
-      SubnetId: !Ref SubnetId
-      SecurityGroupIds:
-        - !Ref SecurityGroupId
-      IamInstanceProfile: !Ref EC2InstanceProfile
-      PropagateTagsToVolumeOnCreation: true
-      BlockDeviceMappings:
-        - DeviceName: '/dev/xvda'
-          Ebs:
-            VolumeType: 'gp3'
-            DeleteOnTermination: true
-            VolumeSize: 30
-      UserData:
-        Fn::Base64: !Sub |
-          MIME-Version: 1.0
-          Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template'
+      LaunchTemplateData:
+        InstanceType: !Ref InstanceType
+        ImageId: !Ref ImageId
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        IamInstanceProfile:
+          Name: !Ref EC2InstanceProfile
+        # IMDSv2 only; hop limit 2 so containers can reach the instance role credentials.
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2
+        BlockDeviceMappings:
+          - DeviceName: '/dev/xvda'
+            Ebs:
+              VolumeType: 'gp3'
+              DeleteOnTermination: true
+              VolumeSize: 30
+        # Apply the Name and stack tags to launched resources; EBS volumes do not inherit stack tags.
+        TagSpecifications:
+{% for rtype in ['instance', 'volume'] %}
+          - ResourceType: '{{ rtype }}'
+            Tags:
+              - Key: 'Name'
+                Value: !Ref 'AWS::StackName'
+{% for key, value in sceptre_user_data.stack_tags.items() %}
+              - Key: '{{ key }}'
+                Value: '{{ value }}'
+{% endfor %}
+{% endfor %}
+        UserData:
+          Fn::Base64: !Sub |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
 
-          --==BOUNDARY==
-          Content-Type: text/x-shellscript; charset="us-ascii"
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
 
-          #!/bin/bash
-          set -uxo pipefail
+            #!/bin/bash
+            set -uxo pipefail
 
-          cat > /tmp/amazon-cloudwatch-agent.json << 'CWA_SCRIPT'
-{% filter indent(10, true) %}{% include 'includes/cloudwatch-agent.json' %}{% endfilter %}
-          CWA_SCRIPT
+            cat > /tmp/amazon-cloudwatch-agent.json << 'CWA_SCRIPT'
+{% filter indent(12, true) %}{% include 'includes/cloudwatch-agent.json' %}{% endfilter %}
+            CWA_SCRIPT
 
-          cat > /tmp/setup-instance.sh << 'SCRIPT'
-          #!/bin/bash
-          set -uxo pipefail
+            cat > /tmp/setup-instance.sh << 'SCRIPT'
+            #!/bin/bash
+            set -uxo pipefail
 
-          dnf update -y
+            dnf update -y
 
-          dnf install amazon-cloudwatch-agent mdadm docker amazon-ecr-credential-helper htop -y
+            dnf install amazon-cloudwatch-agent mdadm docker amazon-ecr-credential-helper htop -y
 
-          systemctl enable --now docker
-          usermod -a -G docker ec2-user
+            systemctl enable --now docker
+            usermod -a -G docker ec2-user
 
-          # Give Docker access to ECR
-          mkdir -p /home/ec2-user/.docker
-          chown ec2-user:ec2-user /home/ec2-user/.docker
-          echo '{"credsStore":"ecr-login"}' > /home/ec2-user/.docker/config.json
-          chown ec2-user:ec2-user /home/ec2-user/.docker/config.json
+            # Give Docker access to ECR
+            mkdir -p /home/ec2-user/.docker
+            chown ec2-user:ec2-user /home/ec2-user/.docker
+            echo '{"credsStore":"ecr-login"}' > /home/ec2-user/.docker/config.json
+            chown ec2-user:ec2-user /home/ec2-user/.docker/config.json
 
-{% filter indent(10, true) %}{% include 'includes/setup-data-disk.sh' %}{% endfilter %}
-          chown ec2-user:ec2-user /data
+{% filter indent(12, true) %}{% include 'includes/setup-data-disk.sh' %}{% endfilter %}
+            chown ec2-user:ec2-user /data
 
-          cp /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
-          amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+            cp /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+            amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
 
-          SCRIPT
+            SCRIPT
 
-          # Run the script only once on the instance
-          cloud-init-per instance setup-instance /bin/bash /tmp/setup-instance.sh
+            # Run the script only once on the instance
+            cloud-init-per instance setup-instance /bin/bash /tmp/setup-instance.sh
 
-          --==BOUNDARY==--
+            --==BOUNDARY==--
+
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AutoScalingGroupName: !Sub '${AWS::StackName}-asg'
+      # DesiredCapacity is left unmanaged so stack updates never override `make dev-up` / `make dev-down`.
+      MinSize: 0
+      MaxSize: 1
+      VPCZoneIdentifier:
+        - !Ref SubnetId
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      # Lets an instance refresh replace the single instance (terminate, then launch).
+      InstanceMaintenancePolicy:
+        MinHealthyPercentage: 0
+        MaxHealthyPercentage: 100
+
+  ScheduledShutdown:
+    Type: 'AWS::AutoScaling::ScheduledAction'
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      DesiredCapacity: 0
+      Recurrence: !Sub '0 ${ShutdownHour} * * *'
+      TimeZone: !Ref ShutdownTimeZone
 
   EC2InstanceProfile:
     Type: 'AWS::IAM::InstanceProfile'
@@ -124,8 +172,8 @@ Resources:
                 - 's3:DeleteObject'
                 - 's3:ListBucket'
               Resource:
-                - !Sub 'arn:aws:s3:::${S3BucketID}'
-                - !Sub 'arn:aws:s3:::${S3BucketID}/*'
+                - !Sub 'arn:aws:s3:::${DataBucketName}'
+                - !Sub 'arn:aws:s3:::${DataBucketName}/*'
                 - !Sub 'arn:aws:s3:::arxiv'
                 - !Sub 'arn:aws:s3:::arxiv/*'
 
