@@ -96,13 +96,17 @@ promote:
 sync-vars:
 > scripts/sync-vars.sh "$(ENV)"
 
-# STACK is the full config path, e.g. dev/ec2.yaml.
-status-dev: check-uv
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml status $(or $(STACK),dev)
+# Optional STACK targets a single stack, e.g. `make status STACK=ec2.yaml`.
+status:
+> @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" status "$(ENV)$(if $(STACK),/$(STACK))"
 
-delete-dev: check-uv
-> @test -n "$(STACK)" || { echo >&2 "STACK is required, e.g. make delete-dev STACK=dev/ec2.yaml"; exit 1; }
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml delete $(STACK)
+delete:
+> @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> @test -n "$(STACK)" || { echo >&2 "STACK is required, e.g. make delete STACK=ec2.yaml"; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" delete "$(ENV)/$(STACK)"
 
 # Optional STACK targets a single stack, e.g. `make diff STACK=ecr.yaml`.
 diff:

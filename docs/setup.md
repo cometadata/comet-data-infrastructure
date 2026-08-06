@@ -122,17 +122,17 @@ Airflow stores the connection in its metadata database and encrypts it with the 
 
 ### Stack status and deletion
 
-Show the status of all dev stacks, or one stack. `STACK` takes the full config path:
+Show the status of all dev stacks, or one stack. `STACK` is the config path relative to the environment:
 
 ```bash
-make status-dev
-make status-dev STACK=dev/ec2.yaml
+make status
+make status STACK=ec2.yaml
 ```
 
 Delete a stack. `STACK` is required; sceptre asks for confirmation before deleting:
 
 ```bash
-make delete-dev STACK=dev/ec2.yaml
+make delete STACK=ec2.yaml
 ```
 
 ### Templates
@@ -149,7 +149,7 @@ make dev-status    # show desired capacity, instance ID, and suspended processes
 make dev-down      # terminate the instance
 ```
 
-After changing the AMI, instance type, or launch template, run `make launch-dev STACK=ec2.yaml` to update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current instance, run `make dev-refresh`, which replaces it with one using the new configuration.
+After changing the AMI, instance type, or launch template, run `make launch STACK=ec2.yaml` to update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current instance, run `make dev-refresh`, which replaces it with one using the new configuration.
 
 A scheduled action sets the desired capacity to zero each night, preventing forgotten instances from continuing to run. The hour and time zone come from `instance_shutdown_hour` and `instance_shutdown_timezone` in `vars-dev.yaml`. For work that must run overnight, use `make dev-keepalive` to disable the nightly shutdown schedule. Run `make dev-autostop` to re-enable it. Re-enabling the schedule does not trigger a missed shutdown, so if you re-enable it after the scheduled shutdown time, the instance will continue running until the following night.
 
