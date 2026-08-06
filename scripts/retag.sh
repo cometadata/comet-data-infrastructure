@@ -9,6 +9,7 @@ source_tag=$2
 version_tag=$3
 
 [[ "$version_tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo >&2 "VERSION_TAG must be X.Y.Z."; exit 1; }
+[[ "$source_tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo >&2 "SOURCE_TAG has an invalid format."; exit 1; }
 
 repos=("comet-$env-batch" "comet-$env-marple" "comet-$env-airflow")
 

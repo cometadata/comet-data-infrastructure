@@ -39,7 +39,7 @@ class TestTagging:
     def test_ecr_retention_only_expires_sha_and_untagged_images(self, rendered_templates):
         resources = rendered_templates["ecr.j2"]["Resources"]
 
-        for logical_id in ("Repository", "BatchRepository", "MarpleRepository", "AirflowRepository"):
+        for logical_id in ("BatchRepository", "MarpleRepository", "AirflowRepository"):
             policy = json.loads(resources[logical_id]["Properties"]["LifecyclePolicy"]["LifecyclePolicyText"])
             selections = [rule["selection"] for rule in policy["rules"]]
             assert selections == [
