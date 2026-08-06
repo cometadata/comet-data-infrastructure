@@ -1,0 +1,11 @@
+template:
+  path: monitoring/costs.j2
+  type: file
+
+dependencies:
+  - dev/monitoring/alerts.yaml
+
+parameters:
+  AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
+  MonthlyBudgetUsd: {{ var.monthly_budget_usd }}
+  EgressBudgetGb: {{ var.egress_budget_gb }}

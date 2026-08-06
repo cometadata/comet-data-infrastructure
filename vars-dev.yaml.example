@@ -9,10 +9,26 @@ template_bucket: your-comet-dev-cloudformation
 # Resolved path: {ssm_prefix}/{env}/AirflowEcrImageUri
 ssm_prefix: /your-org/comet
 
+# Service and Environment scope monitoring and budgets.
 stack_tags:
   CodeRepo: https://github.com/cometadata/comet-data-infrastructure
   Contact: ''
   Environment: dev
+  Service: comet
+
+# Budget and alarm thresholds.
+monthly_budget_usd: 150
+egress_budget_gb: 500
+log_ingestion_threshold_mib_per_5_minutes: 10
+s3_total_storage_threshold_gib: 1000
+compute_age_hours_threshold: 16
+ec2_launches_per_10_minutes_threshold: 5
+fargate_worker_launches_per_10_minutes_threshold: 15
+
+# Required and non-empty. Every address receives SNS monitoring notifications
+# and budget alerts.
+alert_emails:
+  - alerts@example.org
 
 # Format: "<stack-name>::<output-key> <aws-profile>"
 vpc_stack_output: ''

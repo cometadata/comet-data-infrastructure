@@ -1,0 +1,359 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'COMET compute monitoring'
+
+Parameters:
+  Env:
+    Type: String
+
+  AlertTopicArn:
+    Type: String
+
+  ClusterName:
+    Type: String
+
+  FargateWorkerTaskDefinitionArn:
+    Type: String
+
+  MetricNamespace:
+    Type: String
+    Default: 'Comet/Monitoring'
+
+  ExpectedServiceTasks:
+    Type: Number
+
+  ComputeAgeHoursThreshold:
+    Type: Number
+
+  Ec2LaunchesPer10MinutesThreshold:
+    Type: Number
+
+  FargateWorkerLaunchesPer10MinutesThreshold:
+    Type: Number
+
+Resources:
+  MonitorLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/lambda/monitor'
+      RetentionInDays: 14
+
+  # Allows the monitor function to write logs, describe EC2 instances and ECS
+  # tasks, and publish CloudWatch metrics.
+  MonitorRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: monitor
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !GetAtt MonitorLogGroup.Arn
+              - Effect: Allow
+                Action: 'ec2:DescribeInstances'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ecs:ListTasks'
+                  - 'ecs:DescribeTasks'
+                Resource: '*'
+                Condition:
+                  ArnEquals:
+                    'ecs:cluster': !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+              - Effect: Allow
+                Action: 'cloudwatch:PutMetricData'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'cloudwatch:namespace': !Ref MetricNamespace
+
+  # Monitors COMET compute resources across EC2 and ECS. Each run reports the
+  # oldest active compute resource, recent EC2 and Fargate worker launches,
+  # running Fargate service tasks, and service tasks stopped by essential
+  # container failures.
+  MonitorFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: 'Publishes compute age, launch-rate, and Airflow service metrics'
+      Runtime: python3.13
+      Handler: index.handler
+      MemorySize: 128
+      ReservedConcurrentExecutions: 1
+      Timeout: 60
+      Role: !GetAtt MonitorRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref MonitorLogGroup
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ClusterName
+          ENVIRONMENT: !Ref Env
+          FARGATE_WORKER_TASK_DEFINITION_ARN: !Ref FargateWorkerTaskDefinitionArn
+          METRIC_NAMESPACE: !Ref MetricNamespace
+          SERVICE_TAG_VALUE: '{{ sceptre_user_data.stack_tags.Service }}'
+      Code:
+        ZipFile: |
+          import datetime
+          import os
+
+          import boto3
+
+          CLUSTER = os.environ["CLUSTER_NAME"]
+          ENVIRONMENT = os.environ["ENVIRONMENT"]
+          FARGATE_WORKER_TASK_DEFINITION_ARN = os.environ["FARGATE_WORKER_TASK_DEFINITION_ARN"]
+          LAUNCH_LOOKBACK = datetime.timedelta(minutes=10)
+          NAMESPACE = os.environ["METRIC_NAMESPACE"]
+          SERVICE_TAG = os.environ["SERVICE_TAG_VALUE"]
+
+          ec2 = boto3.client("ec2")
+          ecs = boto3.client("ecs")
+          cloudwatch = boto3.client("cloudwatch")
+
+
+          def list_tasks(status):
+              arns = []
+              for page in ecs.get_paginator("list_tasks").paginate(cluster=CLUSTER, desiredStatus=status):
+                  arns.extend(page["taskArns"])
+              tasks = []
+              for start in range(0, len(arns), 100):
+                  tasks.extend(ecs.describe_tasks(cluster=CLUSTER, tasks=arns[start : start + 100])["tasks"])
+              return tasks
+
+
+          def handler(event, context):
+              now = datetime.datetime.now(datetime.timezone.utc)
+
+              def age_hours(start):
+                  return (now - start).total_seconds() / 3600
+
+              def launched_recently(start):
+                  return now - start <= LAUNCH_LOOKBACK
+
+              instances = [
+                  instance
+                  for page in ec2.get_paginator("describe_instances").paginate(
+                      Filters=[
+                          {"Name": "tag:Service", "Values": [SERVICE_TAG]},
+                          {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+                      ]
+                  )
+                  for reservation in page["Reservations"]
+                  for instance in reservation["Instances"]
+              ]
+              ages = [
+                  age_hours(instance["LaunchTime"])
+                  for instance in instances
+                  if instance["State"]["Name"] in ("pending", "running")
+              ]
+              recent_launches = sum(1 for instance in instances if launched_recently(instance["LaunchTime"]))
+
+              running = list_tasks("RUNNING")
+              stopped = list_tasks("STOPPED")
+              service_tasks = sum(
+                  1
+                  for task in running
+                  if task["group"].startswith("service:") and task["lastStatus"] == "RUNNING"
+              )
+              worker_task_definition_family = FARGATE_WORKER_TASK_DEFINITION_ARN.rsplit(":", 1)[0]
+              recent_fargate_worker_launches = sum(
+                  1
+                  for task in running + stopped
+                  if task["taskDefinitionArn"].rsplit(":", 1)[0] == worker_task_definition_family
+                  and launched_recently(task["createdAt"])
+              )
+              # Exclude long-lived service tasks from compute age.
+              ages += [
+                  age_hours(task["startedAt"])
+                  for task in running
+                  if not task["group"].startswith("service:") and "startedAt" in task
+              ]
+
+              # Count non-zero essential-container exits; deployments and scaling use other stop codes.
+              crashed = sum(
+                  1
+                  for task in stopped
+                  if task["group"].startswith("service:")
+                  and task.get("stopCode") == "EssentialContainerExited"
+                  and any(container.get("exitCode") not in (0, None) for container in task["containers"])
+              )
+
+              metrics = {
+                  "OldestComputeAgeHours": max(ages, default=0),
+                  "RecentEc2Launches": recent_launches,
+                  "RecentFargateWorkerLaunches": recent_fargate_worker_launches,
+                  "FargateServiceTaskCount": service_tasks,
+                  "CrashedServiceTasks": crashed,
+              }
+              cloudwatch.put_metric_data(
+                  Namespace=NAMESPACE,
+                  MetricData=[
+                      {
+                          "MetricName": name,
+                          "Value": value,
+                          "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
+                      }
+                      for name, value in metrics.items()
+                  ],
+              )
+              return metrics
+
+  ScheduleRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: 'Runs the monitoring Lambda every 5 minutes'
+      ScheduleExpression: 'rate(5 minutes)'
+      State: ENABLED
+      Targets:
+        - Id: monitor
+          Arn: !GetAtt MonitorFunction.Arn
+
+  SchedulePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !Ref MonitorFunction
+      Action: 'lambda:InvokeFunction'
+      Principal: 'events.amazonaws.com'
+      SourceArn: !GetAtt ScheduleRule.Arn
+
+  # Alarm immediately when retries or an unexpected caller invoke the monitor
+  # more than twice in a 5-minute period.
+  MonitorExcessiveInvocationsAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-monitor-excessive-invocations'
+      AlarmDescription: 'COMET monitor Lambda was invoked too frequently'
+      Namespace: 'AWS/Lambda'
+      MetricName: Invocations
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MonitorFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+
+  # Alarm when any EC2 instance or non-service Fargate task exceeds the age
+  # threshold for two consecutive 5-minute periods.
+  ComputeAgeAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-compute-age'
+      AlarmDescription: 'COMET compute exceeded the age threshold'
+      Namespace: !Ref MetricNamespace
+      MetricName: OldestComputeAgeHours
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref ComputeAgeHoursThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+
+  # Alarm when the rolling 10-minute EC2 launch count exceeds the threshold
+  # for two consecutive 5-minute periods.
+  Ec2LaunchRateAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-ec2-launch-rate'
+      AlarmDescription: 'COMET EC2 launch rate exceeded the threshold'
+      Namespace: !Ref MetricNamespace
+      MetricName: RecentEc2Launches
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref Ec2LaunchesPer10MinutesThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+
+  # Alarm when the rolling 10-minute Fargate worker launch count exceeds the
+  # threshold for two consecutive 5-minute periods.
+  FargateWorkerLaunchRateAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-fargate-worker-launch-rate'
+      AlarmDescription: 'COMET Fargate worker launch rate exceeded the threshold'
+      Namespace: !Ref MetricNamespace
+      MetricName: RecentFargateWorkerLaunches
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref FargateWorkerLaunchesPer10MinutesThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+
+  # Alarm when fewer Airflow service tasks are running than expected for two
+  # consecutive 5-minute periods.
+  ServiceTasksAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-service-tasks'
+      AlarmDescription: 'Fewer Airflow service tasks are running than expected'
+      Namespace: !Ref MetricNamespace
+      MetricName: FargateServiceTaskCount
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref ExpectedServiceTasks
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+
+  # Alarm when one or more Airflow service tasks report an essential container
+  # failure for two consecutive 5-minute periods.
+  CrashedServiceTasksAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-crashed-service-tasks'
+      AlarmDescription: 'Airflow service tasks exited with errors'
+      Namespace: !Ref MetricNamespace
+      MetricName: CrashedServiceTasks
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]

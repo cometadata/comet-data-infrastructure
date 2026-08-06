@@ -29,6 +29,10 @@ export AWS_DEFAULT_REGION=us-east-1
 export ARXIV_TEX_EXTRACT_PATH=/path/to/arxiv-tex-extract
 ```
 
+## AWS account prerequisites
+
+Before deploying the monitoring stacks, enable resource tags for telemetry in the COMET AWS account. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
+
 ## Deploying dev stacks
 
 Preview changes:
@@ -45,7 +49,7 @@ make deploy-dev
 
 ### Airflow image
 
-Airflow services and Fargate workers use a custom `apache/airflow:slim` image with Comet and the Amazon provider installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
+Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the Amazon provider installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
 
 ```bash
 make build-airflow         # build comet-airflow:<version> and :latest

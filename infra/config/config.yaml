@@ -1,3 +1,6 @@
+{% if var.stack_tags.Environment != var.env %}
+{{ environment_tag_must_match_env }}
+{% endif %}
 region: "{{ var.region }}"
 project_code: comet
 

@@ -2,6 +2,13 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: 'Apache Airflow services: api-server, scheduler, dag-processor, triggerer.'
 
+{% set desired_counts = {
+  'api_server': 1,
+  'scheduler': 1,
+  'dag_processor': 1,
+  'triggerer': 1,
+} %}
+
 Parameters:
   ClusterName:
     Type: String
@@ -38,7 +45,7 @@ Resources:
       LaunchType: FARGATE
       PropagateTags: SERVICE
       TaskDefinition: !Ref ApiServerTaskDefArn
-      DesiredCount: 1
+      DesiredCount: {{ desired_counts.api_server }}
       EnableExecuteCommand: true
       DeploymentConfiguration:
         MaximumPercent: 100
@@ -65,7 +72,7 @@ Resources:
       LaunchType: FARGATE
       PropagateTags: SERVICE
       TaskDefinition: !Ref SchedulerTaskDefArn
-      DesiredCount: 1
+      DesiredCount: {{ desired_counts.scheduler }}
       DeploymentConfiguration:
         MaximumPercent: 100
         MinimumHealthyPercent: 0
@@ -88,7 +95,7 @@ Resources:
       LaunchType: FARGATE
       PropagateTags: SERVICE
       TaskDefinition: !Ref DagProcessorTaskDefArn
-      DesiredCount: 1
+      DesiredCount: {{ desired_counts.dag_processor }}
       DeploymentConfiguration:
         MaximumPercent: 100
         MinimumHealthyPercent: 0
@@ -111,7 +118,7 @@ Resources:
       LaunchType: FARGATE
       PropagateTags: SERVICE
       TaskDefinition: !Ref TriggererTaskDefArn
-      DesiredCount: 1
+      DesiredCount: {{ desired_counts.triggerer }}
       DeploymentConfiguration:
         MaximumPercent: 100
         MinimumHealthyPercent: 0
@@ -125,3 +132,7 @@ Resources:
           SecurityGroups:
             - !Ref ServicesSecurityGroupId
           AssignPublicIp: DISABLED
+
+Outputs:
+  ExpectedServiceTaskCount:
+    Value: '{{ desired_counts.values() | sum }}'
