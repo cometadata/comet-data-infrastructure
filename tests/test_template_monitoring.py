@@ -38,7 +38,17 @@ class TestAlarms:
         )
 
     def test_every_bucket_has_a_storage_metric(self, resources, alarm_parameter_targets):
-        expected = {(name, logical_id) for name, logical_id, _ in resources_of_type(resources, "AWS::S3::Bucket")}
+        expected = {
+            (name, logical_id)
+            for name, logical_id, _ in resources_of_type(resources, "AWS::S3::Bucket")
+            if name == "s3.j2"
+        }
+        assert {logical_id for _, logical_id in expected} == {
+            "S3Bucket",
+            "AirflowDagsBucket",
+            "AirflowLogsBucket",
+            "ArtifactBucket",
+        }
         covered = {
             target
             for _, _, metric in alarm_metrics(resources)
@@ -46,6 +56,14 @@ class TestAlarms:
             if (target := metric_resource_target(metric, "BucketName", alarm_parameter_targets))
         }
         assert expected <= covered, f"buckets missing BucketSizeBytes: {sorted(expected - covered)}"
+
+    def test_total_storage_expression_includes_every_bucket_metric(self, rendered_templates):
+        alarm = rendered_templates["monitoring/alarms.j2"]["Resources"]["S3TotalStorageAlarm"]
+        queries = alarm["Properties"]["Metrics"]
+        [total] = [query for query in queries if query.get("ReturnData")]
+        metric_ids = {query["Id"] for query in queries if "MetricStat" in query}
+
+        assert set(total["Expression"].split(" + ")) == metric_ids
 
     def test_every_db_instance_gets_low_storage_events(self, resources, alarm_parameter_targets):
         expected = {(name, logical_id) for name, logical_id, _ in resources_of_type(resources, "AWS::RDS::DBInstance")}

@@ -16,7 +16,3 @@ sceptre_user_data:
   alert_emails: {{ var.alert_emails | tojson }}
   vpc_id: !stack_output_external {{ var.vpc_stack_output }}
   public_subnet: !stack_output_external {{ var.public_subnet_a_stack_output }}
-
-  ecr:
-    name: comet-dev
-    tag: latest

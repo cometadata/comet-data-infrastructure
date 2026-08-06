@@ -1,0 +1,15 @@
+template:
+  path: deploy.j2
+  type: file
+
+parameters:
+  Env: "{{ var.env }}"
+  CodeBuildImage: "{{ var.codebuild_image }}"
+  CodeConnectionArn: "{{ var.code_connection_arn }}"
+  RepositoryId: "{{ var.github_repository_id }}"
+  BranchName: "feature/monitoring"
+  SsmPrefix: "{{ var.ssm_prefix }}"
+  TemplateBucketName: "{{ var.template_bucket }}"
+
+capabilities:
+  - CAPABILITY_IAM

@@ -26,14 +26,6 @@ Parameters:
     Type: String
 
 Resources:
-  # Create /aws/batch/job ourselves so it gets a retention policy.
-  BatchDefaultLogGroup:
-    Type: 'AWS::Logs::LogGroup'
-    DeletionPolicy: Retain
-    Properties:
-      LogGroupName: '/aws/batch/job'
-      RetentionInDays: 14
-
   BatchLaunchTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
     Properties:
@@ -138,9 +130,6 @@ Resources:
 {% for q in queues %}
   {{ q.prefix }}ComputeEnvironment:
     Type: 'AWS::Batch::ComputeEnvironment'
-    # Make sure the log group exists before Batch jobs write to it.
-    DependsOn:
-      - BatchDefaultLogGroup
     Properties:
       # Naming the CE forces delete+recreate on update.
       Type: 'MANAGED'
@@ -183,8 +172,6 @@ Resources:
 {% endfor %}
 
 Outputs:
-  BatchDefaultLogGroupName:
-    Value: !Ref BatchDefaultLogGroup
 {% for q in queues %}
   {{ q.prefix }}JobQueueName:
     Value: !Sub 'comet-${Env}-batch-{{ q.name }}-job-queue'

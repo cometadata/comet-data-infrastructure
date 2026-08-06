@@ -1,3 +1,5 @@
+import json
+
 from conftest import resources_of_type, tag_keys
 
 
@@ -33,3 +35,23 @@ class TestTagging:
                 problems.append(f"{name}:{logical_id} compute environment does not tag instances with scope tags")
 
         assert not problems, problems
+
+    def test_ecr_retention_only_expires_sha_and_untagged_images(self, rendered_templates):
+        resources = rendered_templates["ecr.j2"]["Resources"]
+
+        for logical_id in ("BatchRepository", "MarpleRepository", "AirflowRepository"):
+            policy = json.loads(resources[logical_id]["Properties"]["LifecyclePolicy"]["LifecyclePolicyText"])
+            selections = [rule["selection"] for rule in policy["rules"]]
+            assert selections == [
+                {
+                    "tagStatus": "tagged",
+                    "tagPrefixList": ["sha-"],
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 50,
+                },
+                {
+                    "tagStatus": "untagged",
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 3,
+                },
+            ]

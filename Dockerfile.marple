@@ -17,11 +17,13 @@ COPY docker/marple-entrypoint.sh /usr/local/bin/marple-entrypoint
 RUN chmod +x /usr/local/bin/marple-entrypoint
 
 WORKDIR /code
+# Fetch marple at the commit pinned in versions.env
 ARG MARPLE_REPO
-ARG MARPLE_REF
-# Bump CACHEBUST to force a fresh clone
-ARG CACHEBUST=1
-RUN git clone --branch "${MARPLE_REF}" --depth 1 "${MARPLE_REPO}" /code
+ARG MARPLE_SHA
+RUN git init . && \
+    git remote add origin "${MARPLE_REPO}" && \
+    git fetch --depth 1 origin "${MARPLE_SHA}" && \
+    git checkout FETCH_HEAD
 RUN uv pip install --no-cache -r requirements.txt && uv pip install --no-cache .
 
 EXPOSE 8000

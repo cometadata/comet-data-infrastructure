@@ -1,0 +1,33 @@
+# Main builds push sha-tagged images. Release tags label an existing sha build.
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - '[[ "$COMMIT_ID" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid COMMIT_ID" >&2; exit 1; }'
+      - export IMAGE_TAG="sha-${COMMIT_ID:0:7}"
+      - |
+        case "$PIPELINE_MODE" in
+          release)
+            [[ "$TRIGGER_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release tag: $TRIGGER_TAG" >&2; exit 1; }
+            export VERSION_TAG="${TRIGGER_TAG#v}"
+            ;;
+          build)
+            . ./versions.env
+            curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh
+            mkdir -p ~/.docker && echo "{\"credHelpers\":{\"$ECR_REGISTRY\":\"ecr-login\"}}" > ~/.docker/config.json
+            docker buildx create --driver docker-container --use
+            ;;
+          *)
+            echo "Invalid PIPELINE_MODE: $PIPELINE_MODE" >&2
+            exit 1
+            ;;
+        esac
+  build:
+    commands:
+      - |
+        if [[ "$PIPELINE_MODE" == release ]]; then
+          make retag SOURCE_TAG="$IMAGE_TAG" VERSION_TAG="$VERSION_TAG"
+        else
+          make push-all IMAGE_TAG="$IMAGE_TAG" SKIP_EXISTING=1 REGISTRY_CACHE=1
+        fi

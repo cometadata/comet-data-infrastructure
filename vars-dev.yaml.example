@@ -3,11 +3,18 @@
 env: dev
 region: us-east-1
 template_bucket: your-comet-dev-cloudformation
+codebuild_image: aws/codebuild/amazonlinux-x86_64-standard:6.0
 
-# SSM Parameter Store path prefix for cross-step values (e.g. the Airflow image digest URI
-# written by `make push-airflow-dev`). MUST equal the SSM_PREFIX env var used by the Makefile.
-# Resolved path: {ssm_prefix}/{env}/AirflowEcrImageUri
+# SSM Parameter Store path prefix for image digest parameters
+# ({ssm_prefix}/{env}/images/...) and the vars-dev.yaml copy the deploy project reads.
 ssm_prefix: /your-org/comet
+
+# CodeConnections connection to GitHub (Developer Tools console -> Settings -> Connections),
+# used by the build pipeline and the deploy project.
+code_connection_arn: ''
+
+# GitHub repository in owner/name form.
+github_repository_id: cometadata/comet-data-infrastructure
 
 # Service and Environment scope monitoring and budgets.
 stack_tags:

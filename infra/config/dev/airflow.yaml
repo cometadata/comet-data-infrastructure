@@ -6,7 +6,6 @@ dependencies:
   - dev/security-groups.yaml
   - dev/s3.yaml
   - dev/rds.yaml
-  - dev/ecr.yaml
 
 parameters:
   Env: "{{ var.env }}"
@@ -14,9 +13,8 @@ parameters:
   # Workers launch into the public subnet (they need public IPs to download external data).
   WorkerSubnetId: !stack_attr sceptre_user_data.public_subnet
   JobsSecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
-  # Image URI pinned by digest so the task definitions change on every push.
-  # Written by make push-airflow-dev.
-  AirflowImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/AirflowEcrImageUri
+  # A new digest changes the task definitions and rolls the services on launch.
+  AirflowImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/images/airflow
   DagsBucketName: !stack_output dev/s3.yaml::AirflowDagsBucketName
   DagsBucketArn: !stack_output dev/s3.yaml::AirflowDagsBucketARN
   LogsBucketName: !stack_output dev/s3.yaml::AirflowLogsBucketName

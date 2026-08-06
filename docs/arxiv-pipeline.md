@@ -11,13 +11,14 @@ image. The `/data` directory is the NVMe mount on the instance; the
 pipeline writes under `/data/arxiv/<release-date>/` by default.
 
 Set the bucket, release date, and image env vars up front: the commands
-below reference them. Then pull the image:
+below reference them. Images are tagged with the short commit sha (see
+"Image builds" in setup.md); use the selected deployment image by reading
+the SSM parameter:
 
 ```bash
 export BUCKET="<your-s3-data-bucket>"
 export RELEASE_DATE="2026-04-24"   # change per run (e.g. "2026-04-13-test" for a test run)
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-IMAGE="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/comet-dev:latest"
+IMAGE=$(aws ssm get-parameter --name "<ssm_prefix>/dev/images/batch" --query 'Parameter.Value' --output text)
 docker pull "$IMAGE"
 ```
 

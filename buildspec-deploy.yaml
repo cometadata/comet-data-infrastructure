@@ -1,0 +1,15 @@
+# Deploy buildspec, run by the deploy CodeBuild project (started manually).
+# Fetches the environment's variables from SSM, then launches it with Sceptre.
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - . ./versions.env && curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh
+      - '[[ "$ENV" =~ ^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$ ]] || { echo "Invalid ENV" >&2; exit 1; }'
+      - '[[ "$SSM_PREFIX" =~ ^/([A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$ ]] || { echo "Invalid SSM_PREFIX" >&2; exit 1; }'
+      - aws ssm get-parameter --name "$SSM_PREFIX/$ENV/vars-$ENV.yaml" --with-decryption --query 'Parameter.Value' --output text > "vars-$ENV.yaml"
+      - make install-infra
+  build:
+    commands:
+      - make launch YES=1
