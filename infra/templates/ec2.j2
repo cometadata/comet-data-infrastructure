@@ -18,6 +18,12 @@ Parameters:
   InstanceType:
     Type: 'String'
 
+  DockerComposeVersion:
+    Type: 'String'
+
+  DockerBuildxVersion:
+    Type: 'String'
+
   ShutdownHour:
     Type: 'Number'
     Description: 'Hour of day (0-23) for the nightly scheduled shutdown'
@@ -93,6 +99,12 @@ Resources:
             chown ec2-user:ec2-user /home/ec2-user/.docker
             echo '{"credsStore":"ecr-login"}' > /home/ec2-user/.docker/config.json
             chown ec2-user:ec2-user /home/ec2-user/.docker/config.json
+
+            # Install docker compose and buildx plugins
+            mkdir -p /usr/libexec/docker/cli-plugins
+            curl -fSL https://github.com/docker/compose/releases/download/v${DockerComposeVersion}/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose
+            curl -fSL https://github.com/docker/buildx/releases/download/v${DockerBuildxVersion}/buildx-v${DockerBuildxVersion}.linux-amd64 -o /usr/libexec/docker/cli-plugins/docker-buildx
+            chmod +x /usr/libexec/docker/cli-plugins/docker-compose /usr/libexec/docker/cli-plugins/docker-buildx
 
 {% filter indent(12, true) %}{% include 'includes/setup-data-disk.sh' %}{% endfilter %}
             chown ec2-user:ec2-user /data

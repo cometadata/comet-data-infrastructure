@@ -26,6 +26,10 @@ private_subnet_b_cidr: '10.0.1.0/24'
 # Dev instance type: needs NVMe instance storage for /data
 instance_type: c5ad.large
 
+# Docker CLI plugin versions installed on the dev instance
+instance_docker_compose_version: '5.4.0'
+instance_docker_buildx_version: '0.35.0'
+
 # Hour of day (0-23) and IANA time zone for the dev instance's nightly auto-shutdown
 instance_shutdown_hour: 22
 instance_shutdown_timezone: America/Los_Angeles

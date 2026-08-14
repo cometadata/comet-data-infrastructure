@@ -9,5 +9,7 @@ parameters:
   # No inbound rules; shell access is via SSM, which only needs outbound.
   SecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
   InstanceType: "{{ var.instance_type }}"
+  DockerComposeVersion: "{{ var.instance_docker_compose_version }}"
+  DockerBuildxVersion: "{{ var.instance_docker_buildx_version }}"
   ShutdownHour: "{{ var.instance_shutdown_hour }}"
   ShutdownTimeZone: "{{ var.instance_shutdown_timezone }}"
