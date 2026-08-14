@@ -2,12 +2,14 @@ template:
   path: 'ec2.j2'
   type: 'file'
 
-ignore: {{ var.ignore_ec2 }}
-
 parameters:
   ImageId: !ssm '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
   SubnetId: !stack_attr sceptre_user_data.public_subnet
-  S3BucketID: !stack_output dev/s3.yaml::S3BucketID
+  DataBucketName: !stack_output dev/s3.yaml::DataBucketName
   # No inbound rules; shell access is via SSM, which only needs outbound.
   SecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
-  InstanceType: 'c5ad.16xlarge'
+  InstanceType: "{{ var.instance_type }}"
+  DockerComposeVersion: "{{ var.instance_docker_compose_version }}"
+  DockerBuildxVersion: "{{ var.instance_docker_buildx_version }}"
+  ShutdownHour: "{{ var.instance_shutdown_hour }}"
+  ShutdownTimeZone: "{{ var.instance_shutdown_timezone }}"

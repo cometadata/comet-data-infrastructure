@@ -111,6 +111,14 @@ diff-dev: check-uv
 launch-dev: check-uv
 > uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev$(if $(STACK),/$(STACK))
 
+# STACK is the full config path, e.g. dev/ec2.yaml.
+status-dev: check-uv
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml status $(or $(STACK),dev)
+
+delete-dev: check-uv
+> @test -n "$(STACK)" || { echo >&2 "STACK is required, e.g. make delete-dev STACK=dev/ec2.yaml"; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml delete $(STACK)
+
 deploy-dev: check-ecr-registry check-ssm-prefix push-dev push-batch-dev push-marple-dev push-airflow-dev check-uv
 > uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev
 
@@ -119,6 +127,31 @@ deploy-dev: check-ecr-registry check-ssm-prefix push-dev push-batch-dev push-mar
 # task definition changes and ECS redeploys the services.
 deploy-airflow-dev: check-ecr-registry check-ssm-prefix push-airflow-dev check-uv
 > uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev/airflow-services.yaml
+
+# Dev instance lifecycle (nightly shutdown, keepalive) — see "Dev EC2 instance" in docs/setup.md.
+# The name must match ${AWS::StackName}-asg in infra/templates/ec2.j2.
+DEV_ASG := comet-dev-ec2-asg
+
+dev-up:
+> aws autoscaling set-desired-capacity --auto-scaling-group-name $(DEV_ASG) --desired-capacity 1
+
+dev-down:
+> aws autoscaling set-desired-capacity --auto-scaling-group-name $(DEV_ASG) --desired-capacity 0
+
+# Replace the running instance using the ASG's configured launch template version.
+dev-refresh:
+> aws autoscaling start-instance-refresh --auto-scaling-group-name $(DEV_ASG) --no-cli-pager
+
+dev-keepalive:
+> aws autoscaling suspend-processes --auto-scaling-group-name $(DEV_ASG) --scaling-processes ScheduledActions
+
+dev-autostop:
+> aws autoscaling resume-processes --auto-scaling-group-name $(DEV_ASG) --scaling-processes ScheduledActions
+
+dev-status:
+> aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $(DEV_ASG) \
+    --query 'AutoScalingGroups[0].{desired:DesiredCapacity,instances:Instances[].{id:InstanceId,state:LifecycleState},suspended:SuspendedProcesses[].ProcessName}' \
+    --output json --no-cli-pager
 
 check-uv:
 > @command -v uv >/dev/null 2>&1 || { echo >&2 "uv is required but not installed. Aborting."; exit 1; }

@@ -39,7 +39,8 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub 'comet-${Env}-batch-launch-template'
       LaunchTemplateData:
-        # IMDSv2 only; stops job containers reading the instance role credentials.
+        # IMDSv2 only; the hop limit of 1 stops job containers reading the instance role credentials.
+        # Jobs get their own credentials from their ECS task roles instead.
         MetadataOptions:
           HttpTokens: required
           HttpPutResponseHopLimit: 1

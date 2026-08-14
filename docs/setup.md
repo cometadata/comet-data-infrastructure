@@ -96,19 +96,40 @@ Create the connection before running `datacite_ingest`; `fetch_release` fails if
 
 Airflow stores the connection in its metadata database and encrypts it with the [Fernet key](#rotating-the-fernet-key). Stack deployments do not manage the connection. When rotating the credentials, update both the secret and the connection.
 
-### Manual sceptre commands
+### Stack status and deletion
 
-For commands not exposed by the Makefile, use the infra project:
+Show the status of all dev stacks, or one stack. `STACK` takes the full config path:
 
 ```bash
-uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml status dev
-uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev/ec2.yaml
-uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml delete dev/ec2.yaml
+make status-dev
+make status-dev STACK=dev/ec2.yaml
+```
+
+Delete a stack. `STACK` is required; sceptre asks for confirmation before deleting:
+
+```bash
+make delete-dev STACK=dev/ec2.yaml
 ```
 
 ### Templates
 
 Sceptre templates are Jinja2 (`.j2`): Sceptre renders the Jinja first, then deploys the resulting CloudFormation. Wrap literal `{{...}}` values (e.g. `{{resolve:secretsmanager:...}}`) in `{% raw %}...{% endraw %}` so Jinja doesn't evaluate them.
+
+## Dev EC2 instance
+
+The dev instance is managed by an Auto Scaling Group (`comet-dev-ec2-asg`) that defaults to zero instances, so the stack stays deployed while nothing is running. Start and stop it with:
+
+```bash
+make dev-up        # start the instance
+make dev-status    # show desired capacity, instance ID, and suspended processes
+make dev-down      # terminate the instance
+```
+
+After changing the AMI, instance type, or launch template, run `make launch-dev STACK=ec2.yaml` to update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current instance, run `make dev-refresh`, which replaces it with one using the new configuration.
+
+A scheduled action sets the desired capacity to zero each night, preventing forgotten instances from continuing to run. The hour and time zone come from `instance_shutdown_hour` and `instance_shutdown_timezone` in `vars-dev.yaml`. For work that must run overnight, use `make dev-keepalive` to disable the nightly shutdown schedule. Run `make dev-autostop` to re-enable it. Re-enabling the schedule does not trigger a missed shutdown, so if you re-enable it after the scheduled shutdown time, the instance will continue running until the following night.
+
+Scaling down, refreshing, and the nightly shutdown all terminate the instance, which wipes the NVMe `/data` volume.
 
 ## Open the Airflow UI
 
