@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.sdk import Asset, BaseHook, Connection, Metadata, get_current_context
 
 import comet.dynamodb_store as dataset_releases
@@ -70,6 +70,23 @@ def get_airflow_connection(
     return conn
 
 
+def is_asset_triggered() -> bool:
+    """Return True when the current run was triggered by at least one asset event."""
+    return bool(get_current_context()["triggering_asset_events"])
+
+
+def skip_asset_fail_manual(message: str, error: AirflowException | None = None) -> NoReturn:
+    """Skip an asset-triggered run; fail a manual one.
+
+    Args:
+        message: The skip or failure message.
+        error: An underlying error; a manual run re-raises it instead of ``message``.
+    """
+    if is_asset_triggered():
+        raise AirflowSkipException(message) from error
+    raise error or AirflowException(message)
+
+
 def get_triggering_release_key_or_none(asset: Asset) -> tuple[str, str] | None:
     """Return the ``(dataset, release_date)`` key from the triggering asset event, or ``None``.
 
@@ -109,18 +126,18 @@ def get_triggering_release_key_or_none(asset: Asset) -> tuple[str, str] | None:
 
 
 def resolve_release_record(
-    triggering_key: tuple[str, str] | None, *, dataset: str, release_date: str | None
+    *, dataset: str, release_date: str | None, triggering_key: tuple[str, str] | None = None
 ) -> DatasetReleaseRecord:
-    """Resolve the release record to process for an asset-or-manual enrichment run.
+    """Resolve the release record to process for a run.
 
-    Asset-triggered runs pin to the exact triggering release. Manual runs use an explicit
-    ``release_date`` when supplied, otherwise fall back to the latest release for ``dataset``.
+    A ``triggering_key`` pins to that exact release. Otherwise an explicit ``release_date``
+    pins by date, and no date at all resolves the latest release for ``dataset``.
 
     Args:
-        triggering_key: The triggering asset event's key, or ``None`` for a manual run.
-        dataset: The dataset identifier to use for a manual run.
-        release_date: The explicit release date for a manual run (e.g. from ``params``); empty
-            resolves the latest release.
+        dataset: The dataset identifier.
+        release_date: The explicit release date (e.g. from ``params``); empty resolves the
+            latest release.
+        triggering_key: The triggering asset event's ``(dataset, release_date)`` key, if any.
 
     Returns:
         The resolved ``DatasetReleaseRecord``.

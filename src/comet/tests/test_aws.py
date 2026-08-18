@@ -9,6 +9,7 @@ from comet.aws import (
     download_source_task,
     local_dir_for_uri,
     local_file_for_uri,
+    s5cmd_command,
     transform_task,
     upload_files_to_s3,
 )
@@ -193,6 +194,21 @@ class TestTransformTask:
         assert not stage_dir.exists()
 
 
+class TestS5cmdCommand:
+    @pytest.mark.parametrize(
+        "endpoint_url,expected",
+        [
+            (None, ["s5cmd", "--log", "error", "--stat", "cp", "src", "dst"]),
+            (
+                "https://s3.hf.co",
+                ["s5cmd", "--log", "error", "--stat", "--endpoint-url", "https://s3.hf.co", "cp", "src", "dst"],
+            ),
+        ],
+    )
+    def test_places_endpoint_flag_before_subcommand(self, endpoint_url, expected):
+        assert s5cmd_command("cp", "src", "dst", endpoint_url=endpoint_url) == expected
+
+
 class TestUploadFilesToS3:
     def test_adds_each_exclusion_before_source_and_destination(self, mocker, tmp_path):
         mock_run_process = mocker.patch("comet.aws.run_process")
@@ -217,5 +233,6 @@ class TestUploadFilesToS3:
                 "*.tmp",
                 f"{tmp_path}/*",
                 "s3://bucket/output/",
-            ]
+            ],
+            env=None,
         )

@@ -5,6 +5,7 @@ AWS infrastructure for the COMET project, managed with
 
 ## Docs
 
+- [Enrichment data](docs/enrichment-data.md): configure read access and download published releases.
 - [Architecture](docs/architecture.md): system architecture.
 - [Setup and deployment](docs/setup.md): local install and dev-stack deploys.
 - [Running arXiv batch extraction on EC2](docs/arxiv-pipeline.md): test run, full run, and resume procedure.

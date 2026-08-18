@@ -1,30 +1,17 @@
-import os
-
-# Moto credentials. AWS_ENV / AWS_REGION are set in the repo-level conftest.py.
-os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
-os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
-os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
-
 import datetime
 
-from moto import mock_aws
+from pynamodb.exceptions import UpdateError
 import pytest
 
 from comet.dynamodb_store import (
     DatasetReleaseRecord,
     get_latest_release,
     get_release,
+    list_releases,
+    mark_published,
     persist_discovered_release,
 )
 from comet.model.dataset_version_model import DatasetRelease
-
-
-@pytest.fixture
-def releases_table():
-    with mock_aws():
-        DatasetReleaseRecord.create_table(read_capacity_units=1, write_capacity_units=1, wait=True)
-        yield
-        DatasetReleaseRecord.delete_table()
 
 
 def make_release(date_str: str, **overrides) -> DatasetRelease:
@@ -38,6 +25,12 @@ def make_release(date_str: str, **overrides) -> DatasetRelease:
 
 
 class TestGetLatestRelease:
+    def test_uses_a_consistent_read(self, mocker):
+        query = mocker.patch.object(DatasetReleaseRecord, "query", return_value=iter([]))
+
+        assert get_latest_release(dataset="ror") is None
+        query.assert_called_once_with("ror", consistent_read=True, scan_index_forward=False, limit=1)
+
     def test_returns_most_recent_by_release_date(self, releases_table):
         for d in ["2024-01-01", "2024-06-15", "2024-03-10"]:
             persist_discovered_release(dataset="ror", release=make_release(d), run_id=f"run-{d}")
@@ -51,6 +44,13 @@ class TestGetLatestRelease:
 
 
 class TestGetRelease:
+    def test_uses_a_consistent_read(self, mocker):
+        record = mocker.sentinel.record
+        get = mocker.patch.object(DatasetReleaseRecord, "get", return_value=record)
+
+        assert get_release(dataset="ror", release_date="2025-01-01") is record
+        get.assert_called_once_with("ror", "2025-01-01", consistent_read=True)
+
     def test_returns_record_by_primary_key(self, releases_table):
         persist_discovered_release(dataset="ror", release=make_release("2025-01-01"), run_id="run-1")
 
@@ -61,6 +61,13 @@ class TestGetRelease:
 
     def test_returns_none_when_missing(self, releases_table):
         assert get_release(dataset="ror", release_date="2099-01-01") is None
+
+
+def test_list_releases_uses_a_consistent_read(mocker):
+    query = mocker.patch.object(DatasetReleaseRecord, "query", return_value=[])
+
+    assert list_releases(dataset="datacite-funders") == []
+    query.assert_called_once_with("datacite-funders", consistent_read=True)
 
 
 class TestToDatasetRelease:
@@ -93,7 +100,12 @@ class TestPersistDiscoveredRelease:
             download_url="https://zenodo.org/ror.zip",
         )
 
-        record = persist_discovered_release(dataset="ror", release=release, run_id="metaflow-1234")
+        record = persist_discovered_release(
+            dataset="ror",
+            release=release,
+            run_id="metaflow-1234",
+            source_prefix="ror_ingest/metaflow-1234/",
+        )
 
         assert record is not None
         assert record.dataset == "ror"
@@ -102,12 +114,63 @@ class TestPersistDiscoveredRelease:
         assert record.download_url == "https://zenodo.org/ror.zip"
         assert record.file_hash == "md5:deadbeef"
         assert record.run_id == "metaflow-1234"
+        assert record.source_prefix == "ror_ingest/metaflow-1234/"
 
     def test_updates_existing_record_on_duplicate(self, releases_table):
         release = make_release("2025-02-01")
-        first = persist_discovered_release(dataset="ror", release=release, run_id="run-a")
+        first = persist_discovered_release(
+            dataset="ror", release=release, run_id="run-a", source_prefix="ror_ingest/run-a/"
+        )
         second = persist_discovered_release(dataset="ror", release=release, run_id="run-b")
 
         assert second is not None
-        assert get_release(dataset="ror", release_date="2025-02-01").run_id == "run-b"
+        refreshed = get_release(dataset="ror", release_date="2025-02-01")
+        assert refreshed.run_id == "run-b"
+        # A refresh without a source_prefix clears the stale one rather than pointing at the old run.
+        assert refreshed.source_prefix is None
         assert second.created_at == first.created_at
+
+
+class TestMarkPublished:
+    def test_sets_publish_state_and_preserves_other_fields(self, releases_table):
+        persist_discovered_release(dataset="datacite-funders", release=make_release("2026-01-01"), run_id="run-1")
+
+        mark_published(
+            dataset="datacite-funders",
+            release_date="2026-01-01",
+            export_path="datacite/funders/2026-01-01/full/",
+            release_type="full",
+        )
+
+        record = get_release(dataset="datacite-funders", release_date="2026-01-01")
+        assert record.published_at is not None
+        assert record.export_path == "datacite/funders/2026-01-01/full/"
+        assert record.release_type == "full"
+        assert record.run_id == "run-1"
+        assert record.updated_at == record.published_at
+
+    def test_raises_when_release_missing(self, releases_table):
+        with pytest.raises(UpdateError):
+            mark_published(
+                dataset="datacite-funders",
+                release_date="2099-01-01",
+                export_path="datacite/funders/2099-01-01/full/",
+                release_type="full",
+            )
+
+    def test_publish_state_survives_persist_rerun(self, releases_table):
+        release = make_release("2026-01-01")
+        persist_discovered_release(dataset="datacite-funders", release=release, run_id="run-a")
+        mark_published(
+            dataset="datacite-funders",
+            release_date="2026-01-01",
+            export_path="datacite/funders/2026-01-01/full/",
+            release_type="full",
+        )
+
+        persist_discovered_release(dataset="datacite-funders", release=release, run_id="run-b")
+
+        record = get_release(dataset="datacite-funders", release_date="2026-01-01")
+        assert record.run_id == "run-b"
+        assert record.published_at is not None
+        assert record.export_path == "datacite/funders/2026-01-01/full/"

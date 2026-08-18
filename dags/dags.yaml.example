@@ -39,3 +39,13 @@ dags:
       start_date: 2026-01-01
       tags: [datacite, enrich]
       bucket_name: <your-s3-bucket>
+
+  - dag_id: datacite_publish
+    factory: comet.dags.publish_enrichments.create_publish_enrichments_dag
+    params:
+      start_date: 2026-01-01
+      tags: [datacite, publish]
+      source: datacite
+      bucket_name: <your-s3-bucket>
+      hf_bucket_name: comet-enrichments
+      hf_endpoint_url: https://s3.hf.co/cometadata

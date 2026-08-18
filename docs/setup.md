@@ -32,7 +32,7 @@ export AWS_DEFAULT_REGION=us-east-1
 
 COMET uses a shared VPC, public subnet, and route table created outside this repository. You also need an S3 bucket for CloudFormation templates and a GitHub connection in **Developer Tools → Settings → Connections**. Create and authorize the connection, and confirm that its status is **Available**. Record the stack outputs, bucket name, connection ARN, and GitHub repository ID in `vars-dev.yaml` during the [first deployment](#first-deployment).
 
-Create the [DataCite credentials](#datacite-credentials) and [Airflow Fernet key](#rotating-the-fernet-key) in Secrets Manager before deploying. Use the default `aws/secretsmanager` encryption key for both. The COMET roles do not have permission to decrypt customer-managed KMS keys.
+Create the [DataCite credentials](#datacite-credentials), [Hugging Face publish credentials](#hugging-face-publish-credentials), and [Airflow Fernet key](#rotating-the-fernet-key) in Secrets Manager before deploying. Use the default `aws/secretsmanager` encryption key for all three. The COMET roles do not have permission to decrypt customer-managed KMS keys.
 
 Enable resource tags for telemetry in the COMET AWS account before deploying the monitoring stacks. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
 
@@ -182,7 +182,14 @@ These objects must exist before running the DataCite enrichment DAGs. Infrastruc
 
 Configure the DataCite account ID and password in two places: Secrets Manager for the `download-datacite` Batch job and an Airflow connection for the `datacite_ingest` DAG.
 
-For the Batch job, create an "other type of secret" with `account_id` and `password` keys. Name it `comet-<env>-batch-datacite-credentials`, leave encryption on the default `aws/secretsmanager` key, and set its ARN as `datacite_credentials_secret_arn` in `vars-dev.yaml`.
+Create the Batch secret:
+
+```bash
+aws secretsmanager create-secret --name comet-dev-batch-datacite-credentials \
+  --secret-string '{"account_id":"<id>","password":"<password>"}'
+```
+
+Copy the returned ARN to `datacite_credentials_secret_arn` in `vars-dev.yaml`.
 
 For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui)), go to Admin → Connections, and add a connection with these fields:
 
@@ -196,6 +203,21 @@ Only Login and Password are used. Leave Description, Host, Schema, Port, and Ext
 Create the connection before running `datacite_ingest`; `fetch_release` fails if it is missing. `datacite_conn_name` defaults to `datacite`.
 
 Airflow stores the connection in its metadata database and encrypts it with the [Fernet key](#rotating-the-fernet-key). Stack deployments do not manage the connection. When rotating the credentials, update both the secret and the connection.
+
+### Hugging Face publish credentials
+
+The `publish` Batch job uploads enrichment releases to a Hugging Face S3-compatible bucket and reads its credentials from Secrets Manager.
+
+Create the publish secret:
+
+```bash
+aws secretsmanager create-secret --name comet-dev-batch-hf-credentials \
+  --secret-string '{"access_key_id":"<key-id>","secret_access_key":"<secret-key>"}'
+```
+
+Copy the returned ARN to `hf_credentials_secret_arn` in `vars-dev.yaml`.
+
+The Hugging Face bucket name and endpoint URL are set on the `datacite_publish` entry in `dags.yaml`.
 
 ### Stack status and deletion
 
