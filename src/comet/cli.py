@@ -23,6 +23,42 @@ def setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, handlers=[handler])
 
 
+@app.command
+def publish(
+    *,
+    source: str,
+    release_date: str,
+    source_uris: str,
+    hf_bucket: str,
+    hf_endpoint_url: str,
+) -> None:
+    """Publish a source's enrichment releases for a snapshot date to the Hugging Face bucket.
+
+    Copies each given dataset's release files to its release folder unless already
+    published, records the publish state, then renders and uploads the release index.
+
+    Args:
+        source: The source dataset name, e.g. "datacite".
+        release_date: ISO date string "YYYY-MM-DD" of the snapshot to publish.
+        source_uris: JSON object mapping dataset name to its enrich run prefix S3 URI
+            on the data bucket (trailing slash).
+        hf_bucket: The Hugging Face bucket name.
+        hf_endpoint_url: The Hugging Face S3-compatible endpoint URL.
+    """
+    import json
+
+    from comet import exports
+
+    setup_logging()
+    exports.publish_releases(
+        source=source,
+        release_date=release_date,
+        source_uris=json.loads(source_uris),
+        hf_bucket=hf_bucket,
+        endpoint_url=hf_endpoint_url,
+    )
+
+
 @arxiv_app.command
 def manifest_parquet(input_file: Path, output_dir: Path = Path()) -> None:
     """Convert an arXiv manifest XML file to Parquet format."""

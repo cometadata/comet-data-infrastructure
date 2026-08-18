@@ -197,6 +197,23 @@ Create the connection before running `datacite_ingest`; `fetch_release` fails if
 
 Airflow stores the connection in its metadata database and encrypts it with the [Fernet key](#rotating-the-fernet-key). Stack deployments do not manage the connection. When rotating the credentials, update both the secret and the connection.
 
+### Hugging Face publish credentials
+
+The `publish` Batch job uploads enrichment releases to a Hugging Face S3-compatible bucket and reads its credentials from Secrets Manager.
+
+Create an "other type of secret" with `access_key_id` and `secret_access_key` keys holding the Hugging Face bucket keys. Name it `comet-<env>-batch-hf-credentials`, leave encryption on the default `aws/secretsmanager` key, and set its ARN as `hf_credentials_secret_arn` in `vars-dev.yaml`. The `comet-<env>-` name keeps the secret inside the workload permissions boundary, so no bootstrap change is needed.
+
+The Hugging Face bucket name and endpoint URL are not secrets; they are set on the `datacite_publish` entry in `dags.yaml` (see [exports.md](exports.md)).
+
+### Wiping data before the first publish
+
+Before running `datacite_publish` for the first time, delete all existing pipeline data so the first publish starts from a clean slate:
+
+1. In the S3 console, open the `comet-<env>-s3-data` bucket and delete each DAG's folder (`ror_ingest/`, `datacite_ingest/`, `datacite_enrich_*/`). Leave `enrichment-configs/` in place.
+2. In the DynamoDB console, open the `comet-<env>-dataset-releases` table, choose Explore table items, then select and delete every item.
+
+The next `datacite_ingest` and `ror_ingest` runs re-download fresh snapshots, the enrichments re-run from those, and the first publish creates the initial releases on the Hugging Face bucket.
+
 ### Stack status and deletion
 
 Show the status of all dev stacks, or one stack. `STACK` is the config path relative to the environment:

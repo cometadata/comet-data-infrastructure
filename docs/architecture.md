@@ -10,6 +10,8 @@ Everything is defined in CloudFormation and deployed with [Sceptre](https://docs
 
 Two ingest DAGs run daily. Each checks the upstream source for a release newer than the last one recorded in the `comet-<env>-dataset-releases` DynamoDB table, downloads it to `s3://<data-bucket>/{dag_id}/{run_id}/`, records the release, and publishes an Airflow Asset. The three DataCite enrichment DAGs are scheduled on the DataCite asset, so they run whenever a new DataCite snapshot is ingested.
 
+Each enrichment asset schedules the `datacite_publish` DAG. The DAG resolves the latest release for each enrichment and publishes when their dates match. It copies the release files from the data bucket to a Hugging Face S3-compatible bucket, records the publish state in the releases table, then uploads a release index that consumers poll. See [exports.md](exports.md).
+
 ![Dataflow](img/dataflow.png)
 
 Heavier processing runs as AWS Batch jobs. The general pattern is to store input and output data in S3: each job downloads the data it needs to local NVMe disk, processes it, uploads the results back to S3, and exits. [s5cmd](https://github.com/peak/s5cmd) is used for the transfers because it is significantly faster than the AWS CLI for large transfers and workloads involving many files. Each job writes to an S3 path that includes the Airflow run ID, and deletes anything already at that path before it starts, so jobs can be re-run safely and don't rely on local state or a specific instance.
@@ -53,9 +55,10 @@ There is one job queue per compute environment, and each compute environment use
 
 ![AWS Batch](img/aws-batch.png)
 
-Three job definitions:
+Four job definitions:
 
 * `download-datacite`: copies the DataCite snapshot to S3. It has its own execution role because ECS injects the DataCite credentials from Secrets Manager.
+* `publish`: copies enrichment releases from the data bucket to the Hugging Face bucket. It has its own execution role because ECS injects the Hugging Face credentials from Secrets Manager.
 * `enrich`: generic single-container CPU enrichment, such as resource type reclassification.
 * `enrich-with-ror`: a [single-node multi-container job](https://docs.aws.amazon.com/batch/latest/userguide/create-job-definition-single-node-multi-container.html) used by the funders and affiliations enrichments. It runs an OpenSearch container, a [Marple](https://gitlab.com/crossref/labs/marple) container that seeds the ROR index, and the main container, which waits until Marple reports ready before running the enrichment binary.
 

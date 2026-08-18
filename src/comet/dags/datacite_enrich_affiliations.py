@@ -12,8 +12,15 @@ from comet.airflow.utils import (
     get_triggering_release_key_or_none,
     resolve_release_record,
 )
-from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name, s3_uri
-from comet.constants import DATACITE_AFFILIATIONS_DATASET_NAME, DATACITE_DATASET_NAME, ROR_DATASET_NAME
+from comet.aws import (
+    BATCH_JOB_TAGS,
+    batch_job_definition_name,
+    batch_job_name,
+    batch_job_queue_name,
+    run_prefix,
+    s3_uri,
+)
+from comet.constants import DATACITE_AFFILIATIONS_ENRICHMENT, DATACITE_DATASET_NAME, ROR_DATASET_NAME
 from comet.dags.datacite_enrich_params import DataCiteEnrichAffiliationsParams, enrich_trigger_params
 import comet.dynamodb_store as dataset_releases
 from comet.model.dataset_version_model import DatasetRelease
@@ -81,7 +88,9 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
         def fetch_datacite_release() -> dict:
             key = get_triggering_release_key_or_none(DATACITE_RELEASE_ASSET)
             release_date = get_current_context()["params"]["release_date"]
-            record = resolve_release_record(key, dataset=DATACITE_DATASET_NAME, release_date=release_date)
+            record = resolve_release_record(
+                dataset=DATACITE_DATASET_NAME, release_date=release_date, triggering_key=key
+            )
 
             return record.to_dataset_release().to_dict()
 
@@ -148,7 +157,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "s3://{{ params.bucket_name }}/{{ params.datacite_dag_id }}"
                                     "/{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}/",
                                     "--output-uri",
-                                    "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
+                                    "s3://{{ params.bucket_name }}/" + run_prefix(dag_id, "{{ run_id }}"),
                                     "--provenance-uri",
                                     "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
                                     "--output-writer-lanes",
@@ -165,10 +174,12 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
 
         @task
         def persist_release(release: dict):
+            run_id = get_current_run_id()
             dataset_releases.persist_discovered_release(
-                dataset=DATACITE_AFFILIATIONS_DATASET_NAME,
+                dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier,
                 release=DatasetRelease.from_dict(release),
-                run_id=get_current_run_id(),
+                run_id=run_id,
+                source_prefix=run_prefix(dag_id, run_id),
             )
 
         @task(outlets=[DATACITE_AFFILIATIONS_ASSET])
@@ -176,7 +187,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
             release = DatasetRelease.from_dict(release)
             yield build_release_asset_metadata(
                 asset=DATACITE_AFFILIATIONS_ASSET,
-                dataset=DATACITE_AFFILIATIONS_DATASET_NAME,
+                dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier,
                 release_date=release.release_date,
             )
 

@@ -64,6 +64,14 @@ instance_shutdown_timezone: America/Los_Angeles
 # Use the default aws/secretsmanager encryption key.
 datacite_credentials_secret_arn: ''
 
+# Secrets Manager ARN holding Hugging Face bucket credentials, consumed by the
+# publish AWS Batch job (config/dev/batch-jobs.yaml). Create the secret
+# out-of-band with keys `access_key_id` and `secret_access_key`, e.g.:
+#   aws secretsmanager create-secret --name comet-dev-batch-hf-credentials \
+#     --secret-string '{"access_key_id":"<key-id>","secret_access_key":"<secret-key>"}'
+# Use the default aws/secretsmanager encryption key.
+hf_credentials_secret_arn: ''
+
 # ARN of the Airflow Fernet key secret. CloudFormation does not manage this secret;
 # use the default aws/secretsmanager encryption key and see "Rotating the Fernet key"
 # in docs/setup.md.
