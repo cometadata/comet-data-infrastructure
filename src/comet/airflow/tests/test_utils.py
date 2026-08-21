@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from airflow.exceptions import AirflowException
 import pytest
@@ -50,34 +51,37 @@ class TestGetRequiredConnection:
 
 class TestResolveReleaseRecord:
     def test_asset_triggered_looks_up_triggering_key(self, mocker):
-        get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value="rec")
+        stub = SimpleNamespace(pruned_at=None)
+        get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value=stub)
         get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release")
 
         record = resolve_release_record(
             dataset="datacite", release_date="ignored", triggering_key=("datacite", "2026-06-03")
         )
 
-        assert record == "rec"
+        assert record is stub
         get_release.assert_called_once_with(dataset="datacite", release_date="2026-06-03")
         get_latest.assert_not_called()
 
     def test_manual_run_looks_up_explicit_release_date(self, mocker):
-        get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value="rec")
+        stub = SimpleNamespace(pruned_at=None)
+        get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value=stub)
         get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release")
 
         record = resolve_release_record(dataset="datacite", release_date="2026-06-01")
 
-        assert record == "rec"
+        assert record is stub
         get_release.assert_called_once_with(dataset="datacite", release_date="2026-06-01")
         get_latest.assert_not_called()
 
     def test_manual_run_without_release_date_uses_latest(self, mocker):
+        stub = SimpleNamespace(pruned_at=None)
         get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release")
-        get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release", return_value="rec")
+        get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release", return_value=stub)
 
         record = resolve_release_record(dataset="datacite", release_date=None)
 
-        assert record == "rec"
+        assert record is stub
         get_latest.assert_called_once_with(dataset="datacite")
         get_release.assert_not_called()
 
@@ -85,3 +89,9 @@ class TestResolveReleaseRecord:
         mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release", return_value=None)
         with pytest.raises(AirflowException, match="No release found"):
             resolve_release_record(dataset="datacite", release_date=None)
+
+    def test_raises_when_release_was_pruned(self, mocker):
+        pruned = SimpleNamespace(release_date="2026-06-01", pruned_at="2026-07-15T00:00:00+00:00")
+        mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value=pruned)
+        with pytest.raises(AirflowException, match="pruned"):
+            resolve_release_record(dataset="datacite", release_date="2026-06-01")

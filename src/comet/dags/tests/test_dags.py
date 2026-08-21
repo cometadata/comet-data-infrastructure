@@ -39,6 +39,8 @@ from comet.dags.datacite_enrich_params import (
 )
 from comet.dags.datacite_enrich_resource_type_general import create_datacite_enrich_resource_type_general_dag
 from comet.dags.datacite_ingest import DataCiteIngestParams, create_datacite_ingest_dag
+import comet.dags.prune_releases as prune_releases
+from comet.dags.prune_releases import PruneReleasesParams, create_prune_releases_dag
 import comet.dags.publish_enrichments as publish_enrichments
 from comet.dags.publish_enrichments import PublishEnrichmentsParams, create_publish_enrichments_dag
 from comet.dags.ror_ingest import RorIngestParams, create_ror_ingest_dag
@@ -50,6 +52,13 @@ EXAMPLE_CONFIG = REPO_ROOT / "dags" / "dags.yaml.example"
 
 START_DATE = datetime.datetime(2026, 1, 1)
 HF_ENDPOINT_URL = "https://s3.hf.co/test-namespace"
+PRODUCER_DAG_IDS = [
+    "ror_ingest",
+    "datacite_ingest",
+    "datacite_enrich_resource_type_general",
+    "datacite_enrich_funders",
+    "datacite_enrich_affiliations",
+]
 
 
 def test_publish_params_require_hf_endpoint():
@@ -59,6 +68,17 @@ def test_publish_params_require_hf_endpoint():
             source="datacite",
             bucket_name="test-bucket",
             hf_bucket_name="test-hf-bucket",
+        )
+
+
+def test_publish_params_reject_source_without_enrichments():
+    with pytest.raises(ValidationError, match="Source 'ror' has no enrichments to publish"):
+        PublishEnrichmentsParams(
+            start_date=START_DATE,
+            source="ror",
+            bucket_name="test-bucket",
+            hf_bucket_name="test-hf-bucket",
+            hf_endpoint_url=HF_ENDPOINT_URL,
         )
 
 
@@ -140,6 +160,19 @@ DAG_CASES = [
         {
             "resolve_releases": {"publish"},
             "publish": set(),
+        },
+    ),
+    DagCase(
+        "prune_releases",
+        create_prune_releases_dag,
+        PruneReleasesParams(
+            start_date=START_DATE,
+            bucket_name="test-bucket",
+            producer_dag_ids=PRODUCER_DAG_IDS,
+        ),
+        "0 0 15 * *",
+        {
+            "prune": set(),
         },
     ),
     DagCase(
@@ -271,7 +304,7 @@ class TestPublishEnrichmentsDag:
         mocker.patch.object(
             publish_enrichments,
             "get_current_context",
-            return_value={"params": {"bucket_name": "test-bucket", "release_date": release_date, "datasets": datasets}},
+            return_value={"params": {"release_date": release_date, "datasets": datasets}},
         )
 
     def test_publishes_record_source_uris_when_latest_releases_align(self, dag, mocker):
@@ -349,9 +382,7 @@ class TestEnrichFetchRorRelease:
         mocker.patch.object(
             module,
             "get_current_context",
-            return_value={
-                "params": {"bucket_name": "test-bucket", "ror_dag_id": "ror_ingest", "ror_release_date": None}
-            },
+            return_value={"params": {"ror_dag_id": "ror_ingest", "ror_release_date": None}},
         )
         record = SimpleNamespace(release_date="2026-02-03", run_id="ror-run", file_name="ror.zip")
         mock_resolve = mocker.patch.object(module, "resolve_release_record", return_value=record)
@@ -362,19 +393,170 @@ class TestEnrichFetchRorRelease:
         assert resolved == {"release_date": "2026-02-03", "uri": "s3://test-bucket/ror_ingest/ror-run/ror.zip"}
 
 
-class TestEnrichPersistRelease:
-    @pytest.mark.parametrize("case", ENRICH_CASES, ids=lambda c: c.dataset)
-    def test_persist_release_stores_the_enrich_output_prefix(self, case, mocker):
-        dag = case.factory("enrich_test", case.params)
+class TestPruneReleasesDag:
+    @pytest.fixture
+    def dag(self):
+        params = PruneReleasesParams(
+            start_date=START_DATE,
+            bucket_name="test-bucket",
+            producer_dag_ids=PRODUCER_DAG_IDS,
+        )
+        return create_prune_releases_dag("prune_releases", params)
+
+    @pytest.mark.parametrize("dag_ids", [[], ["bad/id"]])
+    def test_rejects_unsafe_s3_roots(self, dag_ids):
+        with pytest.raises(ValidationError):
+            PruneReleasesParams(
+                start_date=START_DATE,
+                bucket_name="test-bucket",
+                producer_dag_ids=dag_ids,
+            )
+
+    @staticmethod
+    def patch_task(mocker, *, prefix, timestamp, fixed_now, candidates, dry_run):
+        mocks = SimpleNamespace(
+            list=mocker.patch.object(prune_releases, "list_run_prefixes", return_value={prefix}),
+            timestamp=mocker.patch.object(prune_releases, "first_object_timestamp", return_value=timestamp),
+            select=mocker.patch.object(prune_releases.pruning, "select_prune_candidates", return_value=candidates),
+            delete=mocker.patch.object(prune_releases, "delete_s3_prefix"),
+            mark=mocker.patch.object(prune_releases, "mark_release_pruned"),
+            client=mocker.patch.object(prune_releases.boto3, "client").return_value,
+        )
+        mocker.patch.object(prune_releases, "list_all_releases", return_value=[])
+        mock_datetime = mocker.patch.object(prune_releases, "datetime", wraps=datetime.datetime)
+        mock_datetime.now.return_value = fixed_now
+        mocker.patch.object(
+            prune_releases,
+            "get_current_context",
+            return_value={"params": {"orphan_grace_days": 30, "dry_run": dry_run}},
+        )
+        return mocks
+
+    def test_prunes_old_orphans_found_below_configured_dags(self, dag, mocker):
+        prefix = "datacite_ingest/manual__2025-01-01T00:00:00+00:00/"
+        timestamp = datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC)
+        fixed_now = datetime.datetime(2026, 4, 30, 12, tzinfo=datetime.UTC)
+        candidate = prune_releases.pruning.PruneCandidate(prefix, "orphaned run", ())
+        mocks = self.patch_task(
+            mocker, prefix=prefix, timestamp=timestamp, fixed_now=fixed_now, candidates=[candidate], dry_run=True
+        )
+
+        dag.get_task("prune").python_callable()
+
+        mocks.list.assert_called_once_with("test-bucket", PRODUCER_DAG_IDS, s3_client=mocks.client)
+        mocks.timestamp.assert_called_once_with("test-bucket", prefix, s3_client=mocks.client)
+        mocks.select.assert_called_once_with(
+            {prefix: timestamp},
+            [],
+            orphan_cutoff=fixed_now - datetime.timedelta(days=30),
+        )
+        mocks.delete.assert_called_once_with(
+            "test-bucket",
+            prefix,
+            s3_client=mocks.client,
+            dry_run=True,
+        )
+        mocks.mark.assert_not_called()
+
+    def test_marks_referencing_records_before_a_real_delete(self, dag, mocker):
+        prefix = "ror_ingest/run-1/"
+        record = SimpleNamespace(dataset="ror", release_date="2025-01-01")
+        candidate = prune_releases.pruning.PruneCandidate(prefix, "old source release", (record,))
+        mocks = self.patch_task(
+            mocker,
+            prefix=prefix,
+            timestamp=datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC),
+            fixed_now=datetime.datetime(2026, 4, 30, 12, tzinfo=datetime.UTC),
+            candidates=[candidate],
+            dry_run=False,
+        )
+        operations = []
+        mocks.mark.side_effect = lambda **_kwargs: operations.append("mark")
+        mocks.delete.side_effect = lambda *_args, **_kwargs: operations.append("delete")
+
+        dag.get_task("prune").python_callable()
+
+        assert operations == ["mark", "delete"]
+        mocks.delete.assert_called_once_with("test-bucket", prefix, s3_client=mocks.client, dry_run=False)
+        mocks.mark.assert_called_once_with(
+            dataset="ror",
+            release_date="2025-01-01",
+            expected_source_prefix=prefix,
+        )
+
+    def test_does_not_delete_when_marking_fails(self, dag, mocker):
+        prefix = "ror_ingest/run-1/"
+        record = SimpleNamespace(dataset="ror", release_date="2025-01-01")
+        candidate = prune_releases.pruning.PruneCandidate(prefix, "old source release", (record,))
+        mocks = self.patch_task(
+            mocker,
+            prefix=prefix,
+            timestamp=datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC),
+            fixed_now=datetime.datetime(2026, 4, 30, 12, tzinfo=datetime.UTC),
+            candidates=[candidate],
+            dry_run=False,
+        )
+        mocks.mark.side_effect = RuntimeError("DynamoDB unavailable")
+
+        with pytest.raises(RuntimeError, match="DynamoDB unavailable"):
+            dag.get_task("prune").python_callable()
+
+        mocks.delete.assert_not_called()
+
+
+class TestPersistRelease:
+    PERSIST_CASES = [
+        (
+            create_ror_ingest_dag,
+            RorIngestParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "ror",
+            "persist_discovered_release",
+        ),
+        (
+            create_datacite_ingest_dag,
+            DataCiteIngestParams(
+                start_date=START_DATE,
+                bucket_name="test-bucket",
+                datacite_bucket_name="test-datacite-bucket",
+                datacite_bucket_region="eu-west-1",
+            ),
+            "datacite",
+            "persist_discovered_release",
+        ),
+        (
+            create_datacite_enrich_funders_dag,
+            DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "datacite-funders",
+            "persist_release",
+        ),
+        (
+            create_datacite_enrich_affiliations_dag,
+            DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "datacite-affiliations",
+            "persist_release",
+        ),
+        (
+            create_datacite_enrich_resource_type_general_dag,
+            DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "datacite-resource-type-general",
+            "persist_release",
+        ),
+    ]
+
+    @pytest.mark.parametrize(
+        ("factory", "params", "dataset", "task_id"), PERSIST_CASES, ids=[case[2] for case in PERSIST_CASES]
+    )
+    def test_persist_release_stores_the_run_output_prefix(self, factory, params, dataset, task_id, mocker):
+        dag = factory("prefix_test", params)
         mock_persist = mocker.patch.object(dataset_releases, "persist_discovered_release")
-        mocker.patch.object(inspect.getmodule(case.factory), "get_current_run_id", return_value="run-1")
+        mocker.patch.object(inspect.getmodule(factory), "get_current_run_id", return_value="run-1")
         release = DatasetRelease(release_date=datetime.date(2026, 1, 2))
 
-        dag.get_task("persist_release").python_callable(release.to_dict())
+        dag.get_task(task_id).python_callable(release.to_dict())
 
         mock_persist.assert_called_once_with(
-            dataset=case.dataset,
+            dataset=dataset,
             release=release,
             run_id="run-1",
-            source_prefix="enrich_test/run-1/",
+            source_prefix="prefix_test/run-1/",
         )

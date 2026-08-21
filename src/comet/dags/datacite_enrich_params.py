@@ -62,15 +62,6 @@ def enrich_trigger_params(params: DataCiteEnrichParams) -> dict[str, Param]:
         Mapping of param name to ``airflow.sdk.Param`` to pass as ``@dag(params=...)``.
     """
     return {
-        "bucket_name": Param(
-            params.bucket_name,
-            type="string",
-            title="S3 bucket",
-            description=(
-                "The COMET S3 data bucket that holds ingested datasets and enrichment outputs. "
-                "Here it holds the staged snapshot (input) and receives the enrichment output."
-            ),
-        ),
         "datacite_dag_id": Param(
             params.datacite_dag_id,
             type="string",

@@ -38,9 +38,10 @@ class PublishEnrichmentsParams(BaseDagParams):
 
     @field_validator("source")
     @classmethod
-    def source_is_registered(cls, value: str) -> str:
-        """Fail at DAG parse when the source has no registry entry."""
-        enrichments_for_source(value)
+    def source_has_enrichments(cls, value: str) -> str:
+        """Require a source with at least one registered enrichment."""
+        if not enrichments_for_source(value):
+            raise ValueError(f"Source '{value}' has no enrichments to publish")
         return value
 
 
@@ -60,12 +61,6 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
         dag_id=dag_id,
         schedule=AssetAny(*(Asset(dataset) for dataset in datasets)),
         params={
-            "bucket_name": Param(
-                params.bucket_name,
-                type="string",
-                title="Bucket name",
-                description="S3 bucket holding the enrichment run outputs.",
-            ),
             "hf_bucket_name": Param(
                 params.hf_bucket_name,
                 type="string",
@@ -128,8 +123,7 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
             return {
                 "release_date": release_dates.pop(),
                 "source_uris": {
-                    dataset: s3_uri(run_params["bucket_name"], record.source_prefix)
-                    for dataset, record in records.items()
+                    dataset: s3_uri(params.bucket_name, record.source_prefix) for dataset, record in records.items()
                 },
             }
 

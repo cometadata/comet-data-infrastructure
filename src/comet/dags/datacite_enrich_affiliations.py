@@ -19,7 +19,7 @@ from comet.aws import (
     run_prefix,
     s3_uri,
 )
-from comet.constants import DATACITE_AFFILIATIONS_ENRICHMENT, DATACITE_DATASET_NAME, ROR_DATASET_NAME
+from comet.constants import DATACITE_AFFILIATIONS_ENRICHMENT, DATACITE_SOURCE, ROR_SOURCE
 from comet.dags.datacite_enrich_params import DataCiteEnrichAffiliationsParams, enrich_trigger_params
 import comet.dynamodb_store as dataset_releases
 from comet.model.dataset_version_model import DatasetRelease
@@ -88,7 +88,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
             key = get_triggering_release_key_or_none(DATACITE_RELEASE_ASSET)
             release_date = get_current_context()["params"]["release_date"]
             record = resolve_release_record(
-                dataset=DATACITE_DATASET_NAME, release_date=release_date, triggering_key=key
+                dataset=DATACITE_SOURCE.identifier, release_date=release_date, triggering_key=key
             )
 
             return record.to_dataset_release().to_dict()
@@ -96,14 +96,20 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
         @task
         def fetch_ror_release() -> dict:
             run_params = get_current_context()["params"]
-            record = resolve_release_record(dataset=ROR_DATASET_NAME, release_date=run_params["ror_release_date"])
+            record = resolve_release_record(dataset=ROR_SOURCE.identifier, release_date=run_params["ror_release_date"])
 
             return {
                 "release_date": record.release_date,
-                "uri": s3_uri(run_params["bucket_name"], run_params["ror_dag_id"], record.run_id, record.file_name),
+                "uri": s3_uri(params.bucket_name, run_params["ror_dag_id"], record.run_id, record.file_name),
             }
 
         ror_data_uri = "{{ ti.xcom_pull(task_ids='fetch_ror_release')['uri'] }}"
+        datacite_input_uri = s3_uri(
+            params.bucket_name,
+            run_prefix(
+                "{{ params.datacite_dag_id }}", "{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}"
+            ),
+        )
 
         # Multi-container job: overrides go through ecs_properties_override.
         enrich = BatchOperator(
@@ -147,16 +153,15 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "enrich",
                                     "affiliations",
                                     "--input-uri",
-                                    "s3://{{ params.bucket_name }}/{{ params.datacite_dag_id }}"
-                                    "/{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}/",
+                                    datacite_input_uri,
                                     "--output-uri",
-                                    "s3://{{ params.bucket_name }}/" + run_prefix(dag_id, "{{ run_id }}"),
+                                    s3_uri(params.bucket_name, run_prefix(dag_id, "{{ run_id }}")),
                                     "--source-release-date",
                                     "datacite={{ ti.xcom_pull(task_ids='fetch_datacite_release')['release_date'] }}",
                                     "--source-release-date",
                                     "ror={{ ti.xcom_pull(task_ids='fetch_ror_release')['release_date'] }}",
                                     "--provenance-uri",
-                                    "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
+                                    s3_uri(params.bucket_name, "{{ params.provenance_path }}"),
                                     "--output-writer-lanes",
                                     WRITER_LANES,
                                 ],

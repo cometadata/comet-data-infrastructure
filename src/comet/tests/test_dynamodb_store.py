@@ -7,8 +7,10 @@ from comet.dynamodb_store import (
     DatasetReleaseRecord,
     get_latest_release,
     get_release,
+    list_all_releases,
     list_releases,
     mark_published,
+    mark_release_pruned,
     persist_discovered_release,
 )
 from comet.model.dataset_version_model import DatasetRelease
@@ -33,7 +35,9 @@ class TestGetLatestRelease:
 
     def test_returns_most_recent_by_release_date(self, releases_table):
         for d in ["2024-01-01", "2024-06-15", "2024-03-10"]:
-            persist_discovered_release(dataset="ror", release=make_release(d), run_id=f"run-{d}")
+            persist_discovered_release(
+                dataset="ror", release=make_release(d), run_id=f"run-{d}", source_prefix=f"ror_ingest/run-{d}/"
+            )
 
         result = get_latest_release(dataset="ror")
         assert result is not None
@@ -52,7 +56,9 @@ class TestGetRelease:
         get.assert_called_once_with("ror", "2025-01-01", consistent_read=True)
 
     def test_returns_record_by_primary_key(self, releases_table):
-        persist_discovered_release(dataset="ror", release=make_release("2025-01-01"), run_id="run-1")
+        persist_discovered_release(
+            dataset="ror", release=make_release("2025-01-01"), run_id="run-1", source_prefix="ror_ingest/run-1/"
+        )
 
         result = get_release(dataset="ror", release_date="2025-01-01")
         assert result is not None
@@ -70,12 +76,20 @@ def test_list_releases_uses_a_consistent_read(mocker):
     query.assert_called_once_with("datacite-funders", consistent_read=True)
 
 
+def test_list_all_releases_uses_a_consistent_scan(mocker):
+    scan = mocker.patch.object(DatasetReleaseRecord, "scan", return_value=iter([]))
+
+    assert list_all_releases() == []
+    scan.assert_called_once_with(consistent_read=True)
+
+
 class TestToDatasetRelease:
     def test_round_trips_record_fields_including_run_id(self, releases_table):
         persist_discovered_release(
             dataset="ror",
             release=make_release("2025-01-01", metadata={"k": "v"}),
             run_id="run-xyz",
+            source_prefix="ror_ingest/run-xyz/",
         )
 
         release = get_release(dataset="ror", release_date="2025-01-01").to_dataset_release()
@@ -116,24 +130,34 @@ class TestPersistDiscoveredRelease:
         assert record.run_id == "metaflow-1234"
         assert record.source_prefix == "ror_ingest/metaflow-1234/"
 
-    def test_updates_existing_record_on_duplicate(self, releases_table):
+    def test_recreating_pruned_release_clears_pruned_state(self, releases_table):
         release = make_release("2025-02-01")
         first = persist_discovered_release(
             dataset="ror", release=release, run_id="run-a", source_prefix="ror_ingest/run-a/"
         )
-        second = persist_discovered_release(dataset="ror", release=release, run_id="run-b")
+        mark_release_pruned(
+            dataset="ror",
+            release_date="2025-02-01",
+            expected_source_prefix="ror_ingest/run-a/",
+        )
 
-        assert second is not None
+        persist_discovered_release(dataset="ror", release=release, run_id="run-b", source_prefix="ror_ingest/run-b/")
+
         refreshed = get_release(dataset="ror", release_date="2025-02-01")
+        assert refreshed.pruned_at is None
         assert refreshed.run_id == "run-b"
-        # A refresh without a source_prefix clears the stale one rather than pointing at the old run.
-        assert refreshed.source_prefix is None
-        assert second.created_at == first.created_at
+        assert refreshed.source_prefix == "ror_ingest/run-b/"
+        assert refreshed.created_at == first.created_at
 
 
 class TestMarkPublished:
     def test_sets_publish_state_and_preserves_other_fields(self, releases_table):
-        persist_discovered_release(dataset="datacite-funders", release=make_release("2026-01-01"), run_id="run-1")
+        persist_discovered_release(
+            dataset="datacite-funders",
+            release=make_release("2026-01-01"),
+            run_id="run-1",
+            source_prefix="datacite_enrich_funders/run-1/",
+        )
 
         mark_published(
             dataset="datacite-funders",
@@ -160,7 +184,12 @@ class TestMarkPublished:
 
     def test_publish_state_survives_persist_rerun(self, releases_table):
         release = make_release("2026-01-01")
-        persist_discovered_release(dataset="datacite-funders", release=release, run_id="run-a")
+        persist_discovered_release(
+            dataset="datacite-funders",
+            release=release,
+            run_id="run-a",
+            source_prefix="datacite_enrich_funders/run-a/",
+        )
         mark_published(
             dataset="datacite-funders",
             release_date="2026-01-01",
@@ -168,9 +197,56 @@ class TestMarkPublished:
             release_type="full",
         )
 
-        persist_discovered_release(dataset="datacite-funders", release=release, run_id="run-b")
+        persist_discovered_release(
+            dataset="datacite-funders",
+            release=release,
+            run_id="run-b",
+            source_prefix="datacite_enrich_funders/run-b/",
+        )
 
         record = get_release(dataset="datacite-funders", release_date="2026-01-01")
         assert record.run_id == "run-b"
         assert record.published_at is not None
         assert record.export_path == "datacite/funders/2026-01-01/full/"
+
+
+class TestMarkReleasePruned:
+    def test_sets_pruned_state_and_preserves_other_fields(self, releases_table):
+        persist_discovered_release(
+            dataset="ror", release=make_release("2026-01-01"), run_id="run-1", source_prefix="ror_ingest/run-1/"
+        )
+
+        mark_release_pruned(
+            dataset="ror",
+            release_date="2026-01-01",
+            expected_source_prefix="ror_ingest/run-1/",
+        )
+
+        record = get_release(dataset="ror", release_date="2026-01-01")
+        assert record.pruned_at is not None
+        assert record.updated_at == record.pruned_at
+        assert record.source_prefix == "ror_ingest/run-1/"
+
+    def test_raises_when_release_missing(self, releases_table):
+        with pytest.raises(UpdateError):
+            mark_release_pruned(
+                dataset="ror",
+                release_date="2099-01-01",
+                expected_source_prefix="ror_ingest/missing/",
+            )
+
+    def test_rejects_mark_when_release_prefix_changed(self, releases_table):
+        persist_discovered_release(
+            dataset="ror", release=make_release("2026-01-01"), run_id="run-2", source_prefix="ror_ingest/run-2/"
+        )
+
+        with pytest.raises(UpdateError):
+            mark_release_pruned(
+                dataset="ror",
+                release_date="2026-01-01",
+                expected_source_prefix="ror_ingest/run-1/",
+            )
+
+        record = get_release(dataset="ror", release_date="2026-01-01")
+        assert record.pruned_at is None
+        assert record.source_prefix == "ror_ingest/run-2/"

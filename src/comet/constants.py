@@ -2,17 +2,36 @@
 
 from dataclasses import dataclass
 
-# Used as S3 prefixes, DynamoDB hash keys, and Airflow asset names.
-ROR_DATASET_NAME = "ror"
-DATACITE_DATASET_NAME = "datacite"
+
+def validate_releases_to_keep(releases_to_keep: int) -> None:
+    """Require a positive retention count; zero would make the pruning slice empty."""
+    if releases_to_keep < 1:
+        raise ValueError(f"releases_to_keep must be at least 1, got {releases_to_keep}")
+
+
+@dataclass(frozen=True)
+class Source:
+    """Source dataset and minimum number of recent releases to retain."""
+
+    identifier: str
+    releases_to_keep: int
+
+    def __post_init__(self):
+        """Validate the retention count."""
+        validate_releases_to_keep(self.releases_to_keep)
 
 
 @dataclass(frozen=True)
 class Enrichment:
-    """An enrichment method applied to a source dataset."""
+    """Enrichment method and minimum number of published releases to retain."""
 
-    source: str
+    source: Source
     method: str
+    releases_to_keep: int
+
+    def __post_init__(self):
+        """Validate the retention count."""
+        validate_releases_to_keep(self.releases_to_keep)
 
     @property
     def identifier(self) -> str:
@@ -21,36 +40,41 @@ class Enrichment:
         Used as the DynamoDB hash key, the Airflow asset name, and the source_uris
         keys passed to comet publish. Never part of an S3 path.
         """
-        return f"{self.source}-{self.method}"
+        return f"{self.source.identifier}-{self.method}"
 
 
-DATACITE_RESOURCE_TYPE_GENERAL_ENRICHMENT = Enrichment(DATACITE_DATASET_NAME, "resource-type-general")
-DATACITE_FUNDERS_ENRICHMENT = Enrichment(DATACITE_DATASET_NAME, "funders")
-DATACITE_AFFILIATIONS_ENRICHMENT = Enrichment(DATACITE_DATASET_NAME, "affiliations")
+ROR_SOURCE = Source("ror", 12)
+DATACITE_SOURCE = Source("datacite", 3)
 
-# The release index is rendered from this registry, so an enrichment missing here
-# disappears from its source's index.json.
-ENRICHMENTS_BY_SOURCE = {
-    DATACITE_DATASET_NAME: [
+DATACITE_RESOURCE_TYPE_GENERAL_ENRICHMENT = Enrichment(DATACITE_SOURCE, "resource-type-general", 3)
+DATACITE_FUNDERS_ENRICHMENT = Enrichment(DATACITE_SOURCE, "funders", 3)
+DATACITE_AFFILIATIONS_ENRICHMENT = Enrichment(DATACITE_SOURCE, "affiliations", 3)
+
+# Registry used by release indexing and pruning.
+SOURCE_REGISTRY: dict[Source, tuple[Enrichment, ...]] = {
+    ROR_SOURCE: (),
+    DATACITE_SOURCE: (
         DATACITE_RESOURCE_TYPE_GENERAL_ENRICHMENT,
         DATACITE_FUNDERS_ENRICHMENT,
         DATACITE_AFFILIATIONS_ENRICHMENT,
-    ],
+    ),
 }
 
 
 def enrichments_for_source(source: str) -> list[Enrichment]:
-    """Return the registered enrichments for a source.
+    """Look up a registered source's enrichments.
 
     Args:
-        source: The source dataset name, e.g. "datacite".
+        source: The source dataset identifier.
 
     Returns:
-        The source's enrichments in registry order.
+        The source's enrichments in registry order; empty when it has none.
 
     Raises:
-        ValueError: If the source has no registry entry.
+        ValueError: If the source is not registered.
     """
-    if source not in ENRICHMENTS_BY_SOURCE:
-        raise ValueError(f"Unknown source '{source}'; valid sources: {', '.join(sorted(ENRICHMENTS_BY_SOURCE))}")
-    return ENRICHMENTS_BY_SOURCE[source]
+    for registered_source, enrichments in SOURCE_REGISTRY.items():
+        if registered_source.identifier == source:
+            return list(enrichments)
+    valid_sources = ", ".join(sorted(registered.identifier for registered in SOURCE_REGISTRY))
+    raise ValueError(f"Unknown source '{source}'; valid sources: {valid_sources}")

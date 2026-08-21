@@ -54,6 +54,8 @@ class DatasetReleaseRecord(Model):
         release_type: Kind of published release ("full"); None until published.
         published_at: ISO datetime string of the last publish; None until published.
         export_path: Key prefix of the published copy on the export bucket.
+        pruned_at: ISO timestamp set before the source prefix is removed; None until
+            the release is selected for pruning.
         created_at: ISO datetime string of record creation.
         updated_at: ISO datetime string of last update.
     """
@@ -74,6 +76,7 @@ class DatasetReleaseRecord(Model):
     release_type = UnicodeAttribute(null=True)
     published_at = UnicodeAttribute(null=True)
     export_path = UnicodeAttribute(null=True)
+    pruned_at = UnicodeAttribute(null=True)
     created_at = UnicodeAttribute()
     updated_at = UnicodeAttribute()
 
@@ -142,6 +145,11 @@ def list_releases(*, dataset: str) -> list[DatasetReleaseRecord]:
     return list(DatasetReleaseRecord.query(dataset, consistent_read=True))
 
 
+def list_all_releases() -> list[DatasetReleaseRecord]:
+    """Return all release records in unspecified order using a strongly consistent scan."""
+    return list(DatasetReleaseRecord.scan(consistent_read=True))
+
+
 def mark_published(*, dataset: str, release_date: str, export_path: str, release_type: str) -> None:
     """Record that a release has been published to the export bucket.
 
@@ -169,8 +177,28 @@ def mark_published(*, dataset: str, release_date: str, export_path: str, release
     log.info(f"Marked published: dataset={dataset} release_date={release_date} export_path={export_path}")
 
 
+def mark_release_pruned(*, dataset: str, release_date: str, expected_source_prefix: str) -> None:
+    """Mark a release as pruned before removing its S3 data.
+
+    The update fails if the record is missing or no longer references
+    ``expected_source_prefix``, protecting a concurrent refresh.
+    """
+    now = datetime.now(UTC).isoformat()
+    record = DatasetReleaseRecord(dataset, release_date)
+    record.update(
+        actions=[
+            DatasetReleaseRecord.pruned_at.set(now),
+            DatasetReleaseRecord.updated_at.set(now),
+        ],
+        condition=(
+            DatasetReleaseRecord.created_at.exists() & (DatasetReleaseRecord.source_prefix == expected_source_prefix)
+        ),
+    )
+    log.info(f"Marked pruned: dataset={dataset} release_date={release_date}")
+
+
 def persist_discovered_release(
-    *, dataset: str, release: DatasetRelease, run_id: str, source_prefix: str | None = None
+    *, dataset: str, release: DatasetRelease, run_id: str, source_prefix: str
 ) -> DatasetReleaseRecord:
     """Upsert a discovered release, keyed by (dataset, release_date).
 
@@ -197,14 +225,15 @@ def persist_discovered_release(
     actions = [
         DatasetReleaseRecord.created_at.set(DatasetReleaseRecord.created_at | now),
         DatasetReleaseRecord.run_id.set(run_id),
+        DatasetReleaseRecord.source_prefix.set(source_prefix),
         DatasetReleaseRecord.metadata.set(release.metadata),
+        DatasetReleaseRecord.pruned_at.remove(),
         DatasetReleaseRecord.updated_at.set(now),
     ]
     for attribute, value in (
         (DatasetReleaseRecord.file_name, release.file_name),
         (DatasetReleaseRecord.download_url, release.download_url),
         (DatasetReleaseRecord.file_hash, release.file_hash),
-        (DatasetReleaseRecord.source_prefix, source_prefix),
     ):
         actions.append(attribute.set(value) if value is not None else attribute.remove())
 

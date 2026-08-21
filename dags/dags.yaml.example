@@ -49,3 +49,16 @@ dags:
       bucket_name: <your-s3-bucket>
       hf_bucket_name: comet-enrichments
       hf_endpoint_url: https://s3.hf.co/cometadata
+
+  - dag_id: prune_releases
+    factory: comet.dags.prune_releases.create_prune_releases_dag
+    params:
+      start_date: 2026-01-01
+      tags: [prune]
+      bucket_name: <your-s3-bucket>
+      producer_dag_ids:
+        - ror_ingest
+        - datacite_ingest
+        - datacite_enrich_resource_type_general
+        - datacite_enrich_funders
+        - datacite_enrich_affiliations

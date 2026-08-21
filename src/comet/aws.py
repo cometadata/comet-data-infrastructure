@@ -14,7 +14,8 @@ from botocore.exceptions import ClientError
 from comet.utils import local_path, run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Generator, Mapping, Sequence
+    from datetime import datetime
 
     from botocore.client import BaseClient
 
@@ -121,21 +122,30 @@ def s5cmd_command(*args: str, endpoint_url: str | None = None) -> list[str]:
     return ["s5cmd", "--log", "error", "--stat", *endpoint_args, *args]
 
 
-def clean_s3_prefix(
+def s5cmd_clean_prefix(
     s3_uri: str,
     *,
     s3_client: BaseClient | None = None,
     endpoint_url: str | None = None,
     env: Mapping[str, str] | None = None,
 ):
-    """Delete all objects at the specified S3 URI prefix.
+    """Delete all objects at the specified S3 URI prefix using an s5cmd subprocess.
 
     Args:
         s3_uri: The S3 URI prefix to clean.
         s3_client: Optional boto3 S3 client used to check the prefix.
         endpoint_url: Optional S3-compatible endpoint; None targets AWS S3.
         env: Optional environment for the delete subprocess.
+
+    Raises:
+        ValueError: If the URI's key is empty or root-like, or does not end in ``/``;
+            both guards prevent a bug from deleting unintended objects.
     """
+    _, prefix = parse_s3_uri(s3_uri)
+    if not prefix.strip("/ "):
+        raise ValueError(f"Refusing to delete an empty prefix: {s3_uri!r}")
+    if not prefix.endswith("/"):
+        raise ValueError(f"Refusing to delete a prefix without a trailing slash: {s3_uri!r}")
     logger.info(f"Checking and cleaning S3 URI: {s3_uri}")
     if s3_uri_has_files(s3_uri, s3_client=s3_client):
         logger.info(f"Objects found at {s3_uri}, deleting...")
@@ -144,7 +154,80 @@ def clean_s3_prefix(
         logger.info(f"No objects found at {s3_uri}")
 
 
-def upload_files_to_s3(
+def delete_s3_prefix(
+    bucket_name: str, prefix: str, *, s3_client: BaseClient | None = None, dry_run: bool = False
+) -> int:
+    """Delete an S3 prefix with boto3 and return the matching object count.
+
+    In dry-run mode, matching objects are counted without being removed. The prefix
+    must be non-root and end in ``/``.
+
+     Args:
+        bucket_name: The bucket to delete from.
+        prefix: The key prefix to delete, e.g. "datacite_ingest/run-1/".
+        s3_client: Optional boto3 S3 client.
+        dry_run: If True, count and log the objects without deleting them.
+
+    Returns:
+        The number of objects deleted (or that would be deleted).
+
+    Raises:
+        RuntimeError: If S3 reports any object-level deletion errors.
+    """
+    if not prefix.strip("/ "):
+        raise ValueError(f"Refusing to delete an empty prefix: {prefix!r}")
+    if not prefix.endswith("/"):
+        raise ValueError(f"Refusing to delete a prefix without a trailing slash: {prefix!r}")
+    if s3_client is None:
+        s3_client = boto3.client("s3")
+
+    deleted = 0
+    paginator = s3_client.get_paginator("list_objects_v2")
+    # Pages hold at most 1000 keys, the DeleteObjects maximum, so each page is one batch.
+    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+        keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+        if not keys:
+            continue
+        if not dry_run:
+            response = s3_client.delete_objects(Bucket=bucket_name, Delete={"Objects": keys, "Quiet": True})
+            errors = response.get("Errors", [])
+            if errors:
+                raise RuntimeError(f"Failed to delete {len(errors)} objects under {s3_uri(bucket_name, prefix)}")
+        deleted += len(keys)
+
+    action = "Would delete" if dry_run else "Deleted"
+    logger.info(f"{action} {deleted} objects under {s3_uri(bucket_name, prefix)}")
+    return deleted
+
+
+def list_run_prefixes(
+    bucket_name: str,
+    producer_dag_ids: Sequence[str],
+    *,
+    s3_client: BaseClient,
+) -> set[str]:
+    """List immediate Airflow run prefixes below the configured producer DAGs."""
+    runs: set[str] = set()
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for dag_id in producer_dag_ids:
+        dag_prefix = f"{dag_id}/"
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=dag_prefix, Delimiter="/"):
+            for item in page.get("CommonPrefixes", []):
+                runs.add(item["Prefix"])
+    return runs
+
+
+def first_object_timestamp(bucket_name: str, prefix: str, *, s3_client: BaseClient) -> datetime | None:
+    """Return the modification time of the first object below a run prefix."""
+    response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix, MaxKeys=1)
+    contents = response.get("Contents", [])
+    if not contents:
+        logger.warning(f"Protecting empty run prefix: {prefix}")
+        return None
+    return contents[0]["LastModified"]
+
+
+def s5cmd_upload_files(
     local_dir: pathlib.Path,
     s3_uri: str,
     glob_pattern: str = "*",
@@ -169,7 +252,7 @@ def upload_files_to_s3(
     run_process(command, env=env)
 
 
-def upload_file_to_s3(file: pathlib.Path, s3_uri: str):
+def s5cmd_upload_file(file: pathlib.Path, s3_uri: str):
     """Upload a single file to S3.
 
     Args:
@@ -180,7 +263,7 @@ def upload_file_to_s3(file: pathlib.Path, s3_uri: str):
     run_process(s5cmd_command("cp", f"{file}", s3_uri))
 
 
-def download_files_from_s3(source_uri: str, target_dir: pathlib.Path):
+def s5cmd_download_files(source_uri: str, target_dir: pathlib.Path):
     """Download files from S3 to a local directory.
 
     Args:
@@ -191,7 +274,7 @@ def download_files_from_s3(source_uri: str, target_dir: pathlib.Path):
     run_process(s5cmd_command("cp", source_uri, f"{target_dir}/"))
 
 
-def download_file_from_s3(source_uri: str, target_file: pathlib.Path):
+def s5cmd_download_file(source_uri: str, target_file: pathlib.Path):
     """Download a single file from S3.
 
     Args:
@@ -291,7 +374,7 @@ def staged_scratch_dir(target_uri: str) -> Generator[pathlib.Path, Any, None]:
 
     # Remove leftovers from a prior run.
     shutil.rmtree(stage_dir, ignore_errors=True)
-    clean_s3_prefix(target_uri)
+    s5cmd_clean_prefix(target_uri)
     try:
         yield stage_dir
     finally:
@@ -335,7 +418,7 @@ def download_source_task(target_uri: str) -> Generator[DownloadTaskContext, Any,
         )
         yield ctx
 
-        upload_files_to_s3(download_dir, target_uri)
+        s5cmd_upload_files(download_dir, target_uri)
 
 
 @dataclass
@@ -383,7 +466,7 @@ def transform_task(
         transform_dir = stage_dir / "transform"
 
         download_dir.mkdir(parents=True, exist_ok=True)
-        download_files_from_s3(f"{source_uri}*", download_dir)
+        s5cmd_download_files(f"{source_uri}*", download_dir)
         transform_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Transforming {source_uri} -> {target_uri}")
@@ -394,4 +477,4 @@ def transform_task(
         )
         yield ctx
 
-        upload_files_to_s3(transform_dir, target_uri, upload_glob, upload_exclude_patterns)
+        s5cmd_upload_files(transform_dir, target_uri, upload_glob, upload_exclude_patterns)
