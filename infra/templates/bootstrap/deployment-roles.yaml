@@ -125,7 +125,7 @@ Resources:
             Version: '2012-10-17'
             Statement:
 
-              # Manage environment IAM resources and pass workload roles to the listed services.
+              # Manage environment IAM resources and deny passing workload roles to unlisted services.
               - Sid: 'ManageWorkloadIam'
                 Effect: 'Allow'
                 Action: 'iam:*'
@@ -141,6 +141,20 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/bootstrap/${Env}/runner/*'
                 Condition:
                   StringEquals:
+                    'iam:PassedToService':
+                      - 'codebuild.amazonaws.com'
+                      - 'codepipeline.amazonaws.com'
+                      - 'ec2.amazonaws.com'
+                      - 'ecs-tasks.amazonaws.com'
+                      - 'lambda.amazonaws.com'
+              - Sid: 'DenyPassingWorkloadRolesToOtherServices'
+                Effect: 'Deny'
+                Action: 'iam:PassRole'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/${Env}/*'
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/comet/bootstrap/${Env}/runner/*'
+                Condition:
+                  StringNotEquals:
                     'iam:PassedToService':
                       - 'codebuild.amazonaws.com'
                       - 'codepipeline.amazonaws.com'
