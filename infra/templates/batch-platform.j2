@@ -29,7 +29,7 @@ Resources:
   # Create /aws/batch/job ourselves so it gets a retention policy.
   BatchDefaultLogGroup:
     Type: 'AWS::Logs::LogGroup'
-    DeletionPolicy: Delete
+    DeletionPolicy: Retain
     Properties:
       LogGroupName: '/aws/batch/job'
       RetentionInDays: 14
@@ -164,8 +164,12 @@ Resources:
         SecurityGroupIds:
           - !Ref SecurityGroupId
         InstanceRole: !Ref BatchInstanceProfile
+        # Batch does not propagate stack tags to launched instances.
         Tags:
           Name: !Sub 'comet-${Env}-batch-{{ q.name }}'
+{% for key, value in sceptre_user_data.stack_tags.items() %}
+          '{{ key }}': '{{ value }}'
+{% endfor %}
 
   {{ q.prefix }}JobQueue:
     Type: 'AWS::Batch::JobQueue'

@@ -87,11 +87,35 @@ The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image laye
 
 Images are stored in ECR. The Airflow image is pinned by its sha256 digest, which is stored in SSM. Pushing a new image changes the task definition, which makes ECS redeploy the services.
 
+## Monitoring and cost alerts
+
+### Alarms
+
+* CloudWatch Logs: alarm when log ingestion exceeds the per-five-minute byte threshold in at least two of the last four periods.
+* S3: alarm when combined storage across the three project buckets exceeds the configured threshold.
+* RDS: forward low-storage and configuration-change events to the monitoring SNS topic.
+* EC2 and Fargate worker tasks:
+  * Alarm when tasks exceeds the age threshold for two consecutive five-minute periods.
+  * Alarm when task launches in the previous ten minutes exceed the threshold for two consecutive five-minute periods.
+  * Alarm when task launches in the previous ten minutes exceed the threshold for two consecutive five-minute periods.
+* Airflow ECS services:
+  * Alarm when fewer service tasks are running than expected for two consecutive five-minute periods.
+  * Alarm when one or more service tasks report an essential-container failure for two consecutive five-minute periods.
+* AWS Lambda: alarm when the monitoring function is invoked more than twice in a five-minute period.
+
+### Cost budgets
+* Track monthly amortized costs, alerting at 75%, 90%, and 100% of actual spend and 100% of forecast spend.
+* Track monthly internet egress, alerting at 50%, 75%, and 100% of actual usage and 100% of forecast usage.
+
+### Notifications
+
+Monitoring notifications are delivered to every address in the `alert_emails` list in `vars-dev.yaml`; at least one address is required. CloudWatch alarms, RDS events, and AWS Budgets publish to the monitoring SNS topic, which forwards notifications to those addresses.
+
 ## Future work
 
 Things to consider before using this stack in production:
 
 * Use CodePipeline and CodeBuild to automatically build the Docker images and deploy updates.
-* Set up CloudWatch alerts for CloudWatch logs and other services.
+* Subscribe the monitoring alerts SNS topic to Slack.
 * Enable Container Insights on the ECS cluster for per-task CPU/memory metrics.
 * Could enable UI access via an internal ALB with SSO.

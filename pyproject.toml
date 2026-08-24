@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "aiohttp>=3.12.14",
+    "jinja2>=3,<4",
     "moto>=5.2.1",
     "pytest>=8,<10",
     "pytest-mock>=3,<4",
