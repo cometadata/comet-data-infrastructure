@@ -15,7 +15,6 @@ from comet.dynamodb_store import (
     get_latest_release,
     get_release,
     persist_discovered_release,
-    scan_by_date_range,
 )
 from comet.model.dataset_version_model import DatasetRelease
 
@@ -112,23 +111,3 @@ class TestPersistDiscoveredRelease:
         assert second is not None
         assert get_release(dataset="ror", release_date="2025-02-01").run_id == "run-b"
         assert second.created_at == first.created_at
-
-
-class TestScanByDateRange:
-    @pytest.fixture
-    def populated_table(self, releases_table):
-        for d in ["2024-01-01", "2024-06-15", "2025-01-01", "2025-06-15"]:
-            persist_discovered_release(dataset="ror", release=make_release(d), run_id=f"run-{d}")
-
-    @pytest.mark.parametrize(
-        "start_date,end_date,expected",
-        [
-            (None, None, {"2024-01-01", "2024-06-15", "2025-01-01", "2025-06-15"}),
-            ("2025-01-01", None, {"2025-01-01", "2025-06-15"}),
-            (None, "2024-06-15", {"2024-01-01", "2024-06-15"}),
-            ("2024-06-15", "2025-01-01", {"2024-06-15", "2025-01-01"}),
-        ],
-    )
-    def test_filters_by_bounds(self, populated_table, start_date, end_date, expected):
-        results = scan_by_date_range(DatasetReleaseRecord, start_date=start_date, end_date=end_date)
-        assert {r.release_date for r in results} == expected

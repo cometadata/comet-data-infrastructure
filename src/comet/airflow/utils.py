@@ -108,25 +108,6 @@ def get_triggering_release_key_or_none(asset: Asset) -> tuple[str, str] | None:
         raise AirflowException(f"Triggering asset event for '{asset.uri}' is missing release metadata: {extra}") from e
 
 
-def get_triggering_release_key(asset: Asset) -> tuple[str, str]:
-    """Return the ``(dataset, release_date)`` key from the asset event that triggered this run.
-
-    Args:
-        asset: The inlet asset whose triggering event to read.
-
-    Returns:
-        The ``(dataset, release_date)`` primary key.
-
-    Raises:
-        AirflowException: If the run was not triggered by an event for ``asset``, or the event
-            is missing the expected metadata keys.
-    """
-    key = get_triggering_release_key_or_none(asset)
-    if key is None:
-        raise AirflowException(f"No triggering asset events found for asset '{asset.uri}'")
-    return key
-
-
 def resolve_release_record(
     triggering_key: tuple[str, str] | None, *, dataset: str, release_date: str | None
 ) -> DatasetReleaseRecord:

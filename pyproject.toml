@@ -10,7 +10,6 @@ dependencies = [
     "boto3>=1,<2",
     "pyarrow>=19,<25",
     "cyclopts>=4,<5",
-    "python-magic>=0.4,<1",
     "tqdm>=4,<5",
     "pendulum>=3.2.0",
     "pynamodb>=6.1.0",

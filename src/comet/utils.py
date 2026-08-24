@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import gzip
 import logging
 import os
 import pathlib
 import shlex
-import shutil
 import subprocess
 from typing import TYPE_CHECKING
-import zipfile
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -129,27 +126,3 @@ def run_process(
 
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, args)
-
-
-def extract_zip_to_gzip(file_path: pathlib.Path) -> list[pathlib.Path]:
-    """Extract JSON files from a ZIP archive, compressing each directly to gzip.
-
-    Args:
-        file_path: Path to the ZIP file.
-
-    Returns:
-        List of paths to the gzipped output files.
-    """
-    out_paths = []
-    with zipfile.ZipFile(file_path) as zf:
-        logger.info(f"Files in archive: {file_path}")
-        for name in zf.namelist():
-            logger.info(name)
-            if not name.lower().endswith(".json"):
-                continue
-            out_path = file_path.parent / (pathlib.Path(name).name + ".gz")
-            with zf.open(name) as src, gzip.open(out_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            logger.info(f"Compressed {name} into {out_path.name}")
-            out_paths.append(out_path)
-    return out_paths
