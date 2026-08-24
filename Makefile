@@ -1,6 +1,7 @@
 .RECIPEPREFIX := >
 
 SHELL=/bin/bash
+.DEFAULT_GOAL := help
 
 # Read Python from .python-version and other build versions from versions.env.
 include versions.env
@@ -12,10 +13,33 @@ ENV ?= dev
 # tag such as IMAGE_TAG=local-1 because ECR tags cannot be overwritten.
 IMAGE_TAG ?= sha-$(shell git rev-parse --short=7 HEAD)
 
+.PHONY: help check-ecr-registry check-image-tag check-source-tag
+
+help:
+> @echo "Usage: make <target> [VARIABLE=value]"
+> @echo
+> @echo "Images: build-batch, build-marple, build-airflow, push-batch, push-marple, push-airflow, push-all"
+> @echo "Releases: retag, promote"
+> @echo "Deployment: sync-vars, status, diff, launch, bootstrap, delete"
+> @echo "Dev instance: dev-up, dev-down, dev-refresh, dev-keepalive, dev-autostop, dev-status"
+> @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, clean"
+> @echo
+> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, REGISTRY_CACHE, SKIP_EXISTING, STACK, YES"
+
+check-ecr-registry:
+> @test -n "$(ECR_REGISTRY)" || { echo >&2 "ECR_REGISTRY is required but not set. Aborting."; exit 1; }
+
+check-image-tag:
+> @test -n "$(IMAGE_TAG)" || { echo >&2 "IMAGE_TAG is required but not set. Aborting."; exit 1; }
+
+check-source-tag:
+> @test -n "$(SOURCE_TAG)" || { echo >&2 "SOURCE_TAG is required but not set. Aborting."; exit 1; }
+
 # Sets the cache_args array used by buildx; empty unless REGISTRY_CACHE is set.
 define cache_args
 cache_args=(); \
   if [[ -n "$(REGISTRY_CACHE)" ]]; then \
+    [[ -n "$(ECR_REGISTRY)" ]] || { echo >&2 "ECR_REGISTRY is required when REGISTRY_CACHE is set. Aborting."; exit 1; }; \
     cache_ref="$(ECR_REGISTRY)/comet-$(ENV)-buildcache:$(1)"; \
     cache_args+=(--cache-from "type=registry,ref=$${cache_ref}"); \
     cache_args+=(--cache-to "type=registry,ref=$${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"); \
@@ -37,7 +61,7 @@ build-batch:
     --build-arg "COMET_ENRICH_TARGET=$(COMET_ENRICH_TARGET)" \
     -t comet-batch:latest .
 
-push-batch: build-batch
+push-batch: check-ecr-registry check-image-tag build-batch
 > scripts/push-image.sh "comet-$(ENV)-batch" comet-batch:latest "$(ECR_REGISTRY)" "$(IMAGE_TAG)" "$(SKIP_EXISTING)"
 
 # Marple image pinned by MARPLE_SHA in versions.env.
@@ -50,7 +74,7 @@ build-marple:
     --build-arg "MARPLE_SHA=$(MARPLE_SHA)" \
     -t comet-marple:latest .
 
-push-marple: build-marple
+push-marple: check-ecr-registry check-image-tag build-marple
 > scripts/push-image.sh "comet-$(ENV)-marple" comet-marple:latest "$(ECR_REGISTRY)" "$(IMAGE_TAG)" "$(SKIP_EXISTING)"
 
 # Airflow image with COMET installed from uv.lock.
@@ -75,7 +99,7 @@ build-airflow: check-airflow-version
     --build-arg "S5CMD_VERSION=$(S5CMD_VERSION)" \
     -t "comet-airflow:$(AIRFLOW_VERSION)" -t comet-airflow:latest .
 
-push-airflow: build-airflow
+push-airflow: check-ecr-registry check-image-tag build-airflow
 > scripts/push-image.sh "comet-$(ENV)-airflow" comet-airflow:latest "$(ECR_REGISTRY)" "$(IMAGE_TAG)" "$(SKIP_EXISTING)"
 
 push-all: push-batch push-marple push-airflow
@@ -85,7 +109,7 @@ retag:
 > scripts/retag.sh "$(ENV)" "$(SOURCE_TAG)" "$(VERSION_TAG)"
 
 # Select the image set deploys use, e.g. `make promote SOURCE_TAG=0.1.0`.
-promote:
+promote: check-source-tag
 > scripts/promote.sh "$(ENV)" "$(SOURCE_TAG)" "$(ECR_REGISTRY)"
 
 # Store vars-<env>.yaml in SSM for the deploy project.
