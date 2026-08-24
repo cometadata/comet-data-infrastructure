@@ -54,6 +54,23 @@ Resources:
               - 'ssmmessages:*'
             Resource: '*'
 
+          # ECS agent actions on the Batch-managed clusters, whose names Batch generates.
+          - Sid: 'BatchManagedClusterAgentActions'
+            Effect: 'Allow'
+            Action:
+              - 'ecs:DeregisterContainerInstance'
+              - 'ecs:ListTagsForResource'
+              - 'ecs:Poll'
+              - 'ecs:RegisterContainerInstance'
+              - 'ecs:StartTelemetrySession'
+              - 'ecs:Submit*'
+              - 'ecs:TagResource'
+              - 'ecs:UpdateContainerInstancesState'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/AWSBatch-*'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/AWSBatch-*/*'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/AWSBatch-*/*'
+
           # General workload actions scoped to this environment's resources, Batch jobs,
           # agent parameters, and ARNs supplied as stack parameters.
           - Sid: 'EnvironmentWorkloadActions'

@@ -324,6 +324,20 @@ Resources:
                   - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
                   - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job/*'
               - Effect: Allow
+                Action: 'batch:TagResource'
+                Resource:
+                  - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-queue/comet-${Env}-batch-*'
+                  - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
+                  - !Sub 'arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job/*'
+                Condition:
+                  StringEquals:
+                    'aws:RequestTag/Environment': !Ref Env
+                    'aws:RequestTag/Service': 'comet'
+                  'ForAllValues:StringEquals':
+                    'aws:TagKeys':
+                      - 'Environment'
+                      - 'Service'
+              - Effect: Allow
                 Action: 'batch:DescribeJobs'
                 Resource: '*'
               - Effect: Allow
