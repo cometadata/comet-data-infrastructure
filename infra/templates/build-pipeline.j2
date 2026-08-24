@@ -1,0 +1,317 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'CodePipeline and CodeBuild: build and push the COMET container images'
+
+Parameters:
+  Env:
+    Type: String
+
+  # CodeConnections connection to GitHub, created and authorised outside CloudFormation.
+  CodeConnectionArn:
+    Type: String
+
+  # GitHub repository in owner/name form.
+  RepositoryId:
+    Type: String
+
+  # ECR repo ARNs from the ecr stack.
+  BatchRepositoryArn:
+    Type: String
+
+  MarpleRepositoryArn:
+    Type: String
+
+  AirflowRepositoryArn:
+    Type: String
+
+  BuildCacheRepositoryArn:
+    Type: String
+
+  ArtifactBucketName:
+    Type: String
+
+  ArtifactBucketArn:
+    Type: String
+
+  BranchName:
+    Type: String
+    Default: 'main'
+
+  AlertTopicArn:
+    Type: String
+
+  ComputeType:
+    Type: String
+    Default: 'BUILD_GENERAL1_MEDIUM'
+
+  CodeBuildImage:
+    Type: String
+
+  BuildTimeoutMinutes:
+    Type: Number
+    Default: 60
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+Resources:
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/codebuild/images'
+      RetentionInDays: !Ref LogRetentionDays
+
+  BuildRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/build/'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'codebuild.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'BuildPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !GetAtt LogGroup.Arn
+                  - !Sub '${LogGroup.Arn}:*'
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetBucketAcl'
+                  - 's3:GetBucketLocation'
+                Resource: !Ref ArtifactBucketArn
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetObject'
+                  - 's3:GetObjectVersion'
+                  - 's3:PutObject'
+                Resource: !Sub '${ArtifactBucketArn}/*'
+              - Effect: 'Allow'
+                Action:
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:BatchGetImage'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:DescribeImages'
+                  - 'ecr:PutImage'
+                  - 'ecr:InitiateLayerUpload'
+                  - 'ecr:UploadLayerPart'
+                  - 'ecr:CompleteLayerUpload'
+                  - 'ecr:BatchDeleteImage'
+                Resource:
+                  - !Ref BatchRepositoryArn
+                  - !Ref MarpleRepositoryArn
+                  - !Ref AirflowRepositoryArn
+                  - !Ref BuildCacheRepositoryArn
+              - Effect: 'Allow'
+                Action: 'ecr:GetAuthorizationToken'
+                Resource: '*'
+
+  BuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Sub '${AWS::StackName}-images'
+      Description: 'Builds and releases the COMET container images'
+      ServiceRole: !GetAtt BuildRole.Arn
+      QueuedTimeoutInMinutes: 60
+      TimeoutInMinutes: !Ref BuildTimeoutMinutes
+      Artifacts:
+        Type: 'CODEPIPELINE'
+      Source:
+        Type: 'CODEPIPELINE'
+        BuildSpec: 'buildspec.yaml'
+      Environment:
+        Type: 'LINUX_CONTAINER'
+        ComputeType: !Ref ComputeType
+        Image: !Ref CodeBuildImage
+        HostKernel: 'LINUX_KERNEL_6'
+        ImagePullCredentialsType: 'CODEBUILD'
+        # Docker builds need privileged mode.
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: 'ECR_REGISTRY'
+            Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com'
+          - Name: 'ENV'
+            Value: !Ref Env
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Ref LogGroup
+          Status: 'ENABLED'
+
+  PipelineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/build/'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'codepipeline.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'PipelinePolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'codeconnections:UseConnection'
+                  - 'codestar-connections:UseConnection'
+                Resource: !Ref CodeConnectionArn
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetBucketAcl'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetBucketVersioning'
+                Resource: !Ref ArtifactBucketArn
+              - Effect: 'Allow'
+                Action:
+                  - 's3:GetObject'
+                  - 's3:GetObjectVersion'
+                  - 's3:PutObject'
+                Resource: !Sub '${ArtifactBucketArn}/*'
+              - Effect: 'Allow'
+                Action:
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StopBuild'
+                Resource: !GetAtt BuildProject.Arn
+
+  BuildPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      PipelineType: 'V2'
+      ExecutionMode: 'QUEUED'
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: 'S3'
+        Location: !Ref ArtifactBucketName
+      Triggers:
+        - ProviderType: 'CodeStarSourceConnection'
+          GitConfiguration:
+            SourceActionName: 'Source'
+            Push:
+              - Branches:
+                  Includes:
+                    - !Ref BranchName
+      Stages:
+        - Name: 'Source'
+          Actions:
+            - Name: 'Source'
+              Namespace: 'SourceVariables'
+              ActionTypeId:
+                Category: 'Source'
+                Owner: 'AWS'
+                Provider: 'CodeStarSourceConnection'
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref CodeConnectionArn
+                FullRepositoryId: !Ref RepositoryId
+                BranchName: !Ref BranchName
+                DetectChanges: false
+              OutputArtifacts:
+                - Name: 'SourceArtifact'
+        - Name: 'Build'
+          Actions:
+            - Name: 'BuildImages'
+              ActionTypeId:
+                Category: 'Build'
+                Owner: 'AWS'
+                Provider: 'CodeBuild'
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+                EnvironmentVariables: |
+                  [{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"},{"name":"PIPELINE_MODE","value":"build","type":"PLAINTEXT"}]
+              InputArtifacts:
+                - Name: 'SourceArtifact'
+
+  ReleasePipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Sub '${AWS::StackName}-release'
+      PipelineType: 'V2'
+      ExecutionMode: 'QUEUED'
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: 'S3'
+        Location: !Ref ArtifactBucketName
+      Triggers:
+        - ProviderType: 'CodeStarSourceConnection'
+          GitConfiguration:
+            SourceActionName: 'Source'
+            Push:
+              - Tags:
+                  Includes:
+                    - 'v*'
+      Stages:
+        - Name: 'Source'
+          Actions:
+            - Name: 'Source'
+              Namespace: 'SourceVariables'
+              ActionTypeId:
+                Category: 'Source'
+                Owner: 'AWS'
+                Provider: 'CodeStarSourceConnection'
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref CodeConnectionArn
+                FullRepositoryId: !Ref RepositoryId
+                BranchName: !Ref BranchName
+                DetectChanges: false
+              OutputArtifacts:
+                - Name: 'SourceArtifact'
+        - Name: 'Release'
+          Actions:
+            - Name: 'TagImages'
+              ActionTypeId:
+                Category: 'Build'
+                Owner: 'AWS'
+                Provider: 'CodeBuild'
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+                EnvironmentVariables: |
+                  [{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"},{"name":"TRIGGER_TAG","value":"#{SourceVariables.TagName}","type":"PLAINTEXT"},{"name":"PIPELINE_MODE","value":"release","type":"PLAINTEXT"}]
+              InputArtifacts:
+                - Name: 'SourceArtifact'
+
+  BuildPipelineNotifications:
+    Type: 'AWS::CodeStarNotifications::NotificationRule'
+    Properties:
+      Name: !Sub '${AWS::StackName}-notifications'
+      Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${BuildPipeline}'
+      DetailType: 'BASIC'
+      EventTypeIds:
+        - 'codepipeline-pipeline-pipeline-execution-failed'
+        - 'codepipeline-pipeline-pipeline-execution-succeeded'
+      Targets:
+        - TargetAddress: !Ref AlertTopicArn
+          TargetType: 'SNS'
+
+  ReleasePipelineNotifications:
+    Type: 'AWS::CodeStarNotifications::NotificationRule'
+    Properties:
+      Name: !Sub '${AWS::StackName}-release-notifications'
+      Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ReleasePipeline}'
+      DetailType: 'BASIC'
+      EventTypeIds:
+        - 'codepipeline-pipeline-pipeline-execution-failed'
+        - 'codepipeline-pipeline-pipeline-execution-succeeded'
+      Targets:
+        - TargetAddress: !Ref AlertTopicArn
+          TargetType: 'SNS'

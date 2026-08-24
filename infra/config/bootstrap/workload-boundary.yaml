@@ -1,0 +1,14 @@
+template:
+  path: 'bootstrap/workload-boundary.yaml'
+  type: 'file'
+
+template_bucket_name: "{{ var.template_bucket }}"
+
+parameters:
+  CodeConnectionArn: "{{ var.code_connection_arn }}"
+  DataCiteCredentialsSecretArn: "{{ var.datacite_credentials_secret_arn }}"
+  Env: "{{ var.env }}"
+  FernetSecretArn: "{{ var.fernet_secret_arn }}"
+
+capabilities:
+  - CAPABILITY_IAM

@@ -5,9 +5,6 @@ template:
 parameters:
   Env: "{{ var.env }}"
 
-dependencies:
-  - dev/batch-jobs.yaml
-
 capabilities:
   - CAPABILITY_IAM
   - CAPABILITY_NAMED_IAM

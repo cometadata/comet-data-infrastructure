@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'CodeBuild project that deploys an environment with Sceptre on demand'
+
+Parameters:
+  Env:
+    Type: String
+
+  # CodeBuild assumes this bootstrap-managed role; it delegates stack changes to CloudFormation.
+  DeploymentRunnerRoleArn:
+    Type: String
+
+  # CodeConnections connection to GitHub, created and authorised outside CloudFormation.
+  CodeConnectionArn:
+    Type: String
+
+  # GitHub repository in owner/name form.
+  RepositoryId:
+    Type: String
+
+  BranchName:
+    Type: String
+    Default: 'main'
+
+  # SSM Parameter Store path prefix; must match ssm_prefix in vars-dev.yaml.
+  SsmPrefix:
+    Type: String
+
+  CodeBuildImage:
+    Type: String
+
+  DeployTimeoutMinutes:
+    Type: Number
+    Default: 120
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+Resources:
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/comet/${Env}/codebuild/deploy'
+      RetentionInDays: !Ref LogRetentionDays
+
+  DeployProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      Description: 'Runs Sceptre using the image digests currently stored in SSM'
+      ServiceRole: !Ref DeploymentRunnerRoleArn
+      ConcurrentBuildLimit: 1
+      QueuedTimeoutInMinutes: 60
+      TimeoutInMinutes: !Ref DeployTimeoutMinutes
+      Artifacts:
+        Type: 'NO_ARTIFACTS'
+      Source:
+        Type: 'GITHUB'
+        Location: !Sub 'https://github.com/${RepositoryId}.git'
+        GitCloneDepth: 1
+        BuildSpec: 'buildspec-deploy.yaml'
+        Auth:
+          Type: 'CODECONNECTIONS'
+          Resource: !Ref CodeConnectionArn
+      SourceVersion: !Ref BranchName
+      Environment:
+        Type: 'LINUX_CONTAINER'
+        ComputeType: 'BUILD_GENERAL1_SMALL'
+        Image: !Ref CodeBuildImage
+        HostKernel: 'LINUX_KERNEL_6'
+        ImagePullCredentialsType: 'CODEBUILD'
+        EnvironmentVariables:
+          - Name: 'SSM_PREFIX'
+            Value: !Ref SsmPrefix
+          - Name: 'ENV'
+            Value: !Ref Env
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Ref LogGroup
+          Status: 'ENABLED'

@@ -44,6 +44,8 @@ Resources:
   MonitorRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/monitor/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

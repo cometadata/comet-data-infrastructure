@@ -174,6 +174,10 @@ def download_file_from_s3(source_uri: str, target_file: pathlib.Path):
 AWSEnv = Literal["dev", "stg", "prd"]
 
 
+# Tag Batch runs consistently with deployed resources; Airflow renders the environment at runtime.
+BATCH_JOB_TAGS = {"Environment": "{{ get_env() }}", "Service": "comet"}
+
+
 def batch_job_name(env: str, name: str) -> str:
     """Build the Batch job (run) name: ``comet-{env}-{name}``."""
     return f"comet-{env}-{name}"

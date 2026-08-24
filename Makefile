@@ -2,70 +2,58 @@
 
 SHELL=/bin/bash
 
-check-ecr-registry:
-> @[ -n "$(ECR_REGISTRY)" ] || { echo >&2 "ECR_REGISTRY is required but not set. Aborting."; exit 1; }
-
-check-env:
-> @[ -n "$(ENV)" ] || { echo >&2 "ENV is required but not set. Aborting."; exit 1; }
-
-check-arxiv-tex-extract:
-> @[ -n "$(ARXIV_TEX_EXTRACT_PATH)" ] || { echo >&2 "ARXIV_TEX_EXTRACT_PATH is required but not set. Aborting."; exit 1; }
-
-# SSM_PREFIX is the Parameter Store path prefix the deploy writes the Airflow image digest URI
-# under. It MUST match `ssm_prefix` in vars-dev.yaml (which Sceptre reads via !ssm).
-check-ssm-prefix:
-> @[ -n "$(SSM_PREFIX)" ] || { echo >&2 "SSM_PREFIX is required but not set. Aborting."; exit 1; }
-
 # Read Python from .python-version and other build versions from versions.env.
 include versions.env
 PYTHON_VERSION := $(shell cat .python-version)
 
-build: check-arxiv-tex-extract
-> docker buildx build --platform linux/amd64 --provenance=false --build-context arxiv-tex-extract=$(ARXIV_TEX_EXTRACT_PATH) \
->   --build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
->   --build-arg UV_VERSION=$(UV_VERSION) \
->   --build-arg S5CMD_VERSION=$(S5CMD_VERSION) \
->   --build-arg DUCKDB_VERSION=$(DUCKDB_VERSION) \
->   --build-arg RUST_TARGET_CPU=$(RUST_TARGET_CPU) \
->   -t comet:latest .
+ENV ?= dev
 
-push-dev: check-ecr-registry build
-> docker tag comet:latest $(ECR_REGISTRY)/comet-dev:latest
-> docker push $(ECR_REGISTRY)/comet-dev:latest
+# The default tag identifies the current commit. When pushing uncommitted changes, set a unique
+# tag such as IMAGE_TAG=local-1 because ECR tags cannot be overwritten.
+IMAGE_TAG ?= sha-$(shell git rev-parse --short=7 HEAD)
 
-# AWS Batch image (comet-dev-batch): runtime deps + comet package via Dockerfile.batch
-# (no duckdb, no arxiv-tex-extract).
+# Sets the cache_args array used by buildx; empty unless REGISTRY_CACHE is set.
+define cache_args
+cache_args=(); \
+  if [[ -n "$(REGISTRY_CACHE)" ]]; then \
+    cache_ref="$(ECR_REGISTRY)/comet-$(ENV)-buildcache:$(1)"; \
+    cache_args+=(--cache-from "type=registry,ref=$${cache_ref}"); \
+    cache_args+=(--cache-to "type=registry,ref=$${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"); \
+  fi
+endef
+
+# COMET runtime image (comet-<env>-batch): AWS Batch and the dev arXiv pipeline.
 build-batch:
-> docker buildx build --platform linux/amd64 --provenance=false -f Dockerfile.batch \
->   --build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
->   --build-arg UV_VERSION=$(UV_VERSION) \
->   --build-arg S5CMD_VERSION=$(S5CMD_VERSION) \
->   --build-arg COMET_ENRICH_VERSION=$(COMET_ENRICH_VERSION) \
->   --build-arg COMET_ENRICH_TARGET=$(COMET_ENRICH_TARGET) \
->   -t comet-batch:latest .
+> @$(call cache_args,batch); \
+  docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.batch \
+    --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
+    --build-arg "UV_VERSION=$(UV_VERSION)" \
+    --build-arg "S5CMD_VERSION=$(S5CMD_VERSION)" \
+    --build-arg "DUCKDB_VERSION=$(DUCKDB_VERSION)" \
+    --build-arg "RUST_TARGET_CPU=$(RUST_TARGET_CPU)" \
+    --build-arg "ARXIV_TEX_EXTRACT_REPO=$(ARXIV_TEX_EXTRACT_REPO)" \
+    --build-arg "ARXIV_TEX_EXTRACT_SHA=$(ARXIV_TEX_EXTRACT_SHA)" \
+    --build-arg "COMET_ENRICH_VERSION=$(COMET_ENRICH_VERSION)" \
+    --build-arg "COMET_ENRICH_TARGET=$(COMET_ENRICH_TARGET)" \
+    -t comet-batch:latest .
 
-push-batch-dev: check-ecr-registry build-batch
-> docker tag comet-batch:latest $(ECR_REGISTRY)/comet-dev-batch:latest
-> docker push $(ECR_REGISTRY)/comet-dev-batch:latest
+push-batch: build-batch
+> scripts/push-image.sh "comet-$(ENV)-batch" comet-batch:latest "$(ECR_REGISTRY)" "$(IMAGE_TAG)" "$(SKIP_EXISTING)"
 
-# Marple image (comet-dev-marple): built from Dockerfile.marple, which clones the marple
-# repo branch from GitLab. CACHEBUST forces a fresh clone each build. Requires the Marple
-# changes — create-ror-index/index-ror entry points, /health endpoint, S3 ROR fetch — see
-# the plan / Marple prerequisites.
+# Marple image pinned by MARPLE_SHA in versions.env.
 build-marple:
-> docker buildx build --platform linux/amd64 --provenance=false --build-arg CACHEBUST=$$(date +%s) -f Dockerfile.marple \
->   --build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
->   --build-arg UV_VERSION=$(UV_VERSION) \
->   --build-arg MARPLE_REPO=$(MARPLE_REPO) \
->   --build-arg MARPLE_REF=$(MARPLE_REF) \
->   -t comet-marple:latest .
+> @$(call cache_args,marple); \
+  docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.marple \
+    --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
+    --build-arg "UV_VERSION=$(UV_VERSION)" \
+    --build-arg "MARPLE_REPO=$(MARPLE_REPO)" \
+    --build-arg "MARPLE_SHA=$(MARPLE_SHA)" \
+    -t comet-marple:latest .
 
-push-marple-dev: check-ecr-registry build-marple
-> docker tag comet-marple:latest $(ECR_REGISTRY)/comet-dev-marple:latest
-> docker push $(ECR_REGISTRY)/comet-dev-marple:latest
+push-marple: build-marple
+> scripts/push-image.sh "comet-$(ENV)-marple" comet-marple:latest "$(ECR_REGISTRY)" "$(IMAGE_TAG)" "$(SKIP_EXISTING)"
 
-# Airflow image (comet-dev-airflow): extends apache/airflow:slim with the comet
-# package via Dockerfile.airflow, installed from uv.lock.
+# Airflow image with COMET installed from uv.lock.
 
 # Update uv.lock using Airflow's official constraints.
 bump-airflow:
@@ -80,76 +68,80 @@ check-airflow-version:
 >   [ "$$locked" = "$(AIRFLOW_VERSION)" ] || { echo >&2 "versions.env has AIRFLOW_VERSION=$(AIRFLOW_VERSION) but uv.lock has $$locked. Run make bump-airflow."; exit 1; }
 
 build-airflow: check-airflow-version
-> docker buildx build --platform linux/amd64 --provenance=false -f Dockerfile.airflow \
->   --build-arg AIRFLOW_VERSION=$(AIRFLOW_VERSION) \
->   --build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
->   --build-arg S5CMD_VERSION=$(S5CMD_VERSION) \
->   -t comet-airflow:$(AIRFLOW_VERSION) -t comet-airflow:latest .
+> @$(call cache_args,airflow); \
+  docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.airflow \
+    --build-arg "AIRFLOW_VERSION=$(AIRFLOW_VERSION)" \
+    --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
+    --build-arg "S5CMD_VERSION=$(S5CMD_VERSION)" \
+    -t "comet-airflow:$(AIRFLOW_VERSION)" -t comet-airflow:latest .
 
-# Build, tag, and push the image, then record its immutable digest URI in SSM so Sceptre (!ssm)
-# pins the task definition to this exact image — re-pushing the same tag alone would not change
-# the stack or roll ECS.
-push-airflow-dev: check-ecr-registry check-ssm-prefix build-airflow
-> docker tag comet-airflow:latest $(ECR_REGISTRY)/comet-dev-airflow:$(AIRFLOW_VERSION)
-> docker tag comet-airflow:latest $(ECR_REGISTRY)/comet-dev-airflow:latest
-> docker push $(ECR_REGISTRY)/comet-dev-airflow:$(AIRFLOW_VERSION)
-> docker push $(ECR_REGISTRY)/comet-dev-airflow:latest
-> aws ssm put-parameter \
-    --name "$(SSM_PREFIX)/dev/AirflowEcrImageUri" \
-    --value "$(ECR_REGISTRY)/comet-dev-airflow@$$(aws ecr describe-images \
-        --repository-name comet-dev-airflow \
-        --image-ids imageTag=$(AIRFLOW_VERSION) \
-        --query 'imageDetails[0].imageDigest' \
-        --output text)" \
-    --type String --overwrite
+push-airflow: build-airflow
+> scripts/push-image.sh "comet-$(ENV)-airflow" comet-airflow:latest "$(ECR_REGISTRY)" "$(IMAGE_TAG)" "$(SKIP_EXISTING)"
 
-# Optional STACK targets a single stack, e.g. `make diff-dev STACK=ecr.yaml`;
-# omit it to diff/launch the whole dev environment.
-diff-dev: check-uv
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml diff dev$(if $(STACK),/$(STACK))
+push-all: push-batch push-marple push-airflow
 
-launch-dev: check-uv
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev$(if $(STACK),/$(STACK))
+# Run by the release pipeline; adds VERSION_TAG to an existing sha build.
+retag:
+> scripts/retag.sh "$(ENV)" "$(SOURCE_TAG)" "$(VERSION_TAG)"
 
-# STACK is the full config path, e.g. dev/ec2.yaml.
-status-dev: check-uv
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml status $(or $(STACK),dev)
+# Select the image set deploys use, e.g. `make promote SOURCE_TAG=0.1.0`.
+promote:
+> scripts/promote.sh "$(ENV)" "$(SOURCE_TAG)" "$(ECR_REGISTRY)"
 
-delete-dev: check-uv
-> @test -n "$(STACK)" || { echo >&2 "STACK is required, e.g. make delete-dev STACK=dev/ec2.yaml"; exit 1; }
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml delete $(STACK)
+# Store vars-<env>.yaml in SSM for the deploy project.
+sync-vars:
+> scripts/sync-vars.sh "$(ENV)"
 
-deploy-dev: check-ecr-registry check-ssm-prefix push-dev push-batch-dev push-marple-dev push-airflow-dev check-uv
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev
+# Optional STACK targets a single stack, e.g. `make status STACK=ec2.yaml`.
+status:
+> @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" status "$(ENV)$(if $(STACK),/$(STACK))"
 
-# Iterate on the Airflow image/DAGs: rebuild, push (which records the new digest URI in SSM),
-# then roll just the airflow stack. The digest changes whenever image content changes, so the
-# task definition changes and ECS redeploys the services.
-deploy-airflow-dev: check-ecr-registry check-ssm-prefix push-airflow-dev check-uv
-> uv run --project infra --locked --no-active sceptre --dir infra --var-file=vars-dev.yaml launch dev/airflow-services.yaml
+delete:
+> @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> @test -n "$(STACK)" || { echo >&2 "STACK is required, e.g. make delete STACK=ec2.yaml"; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" delete "$(ENV)/$(STACK)"
+
+# Optional STACK targets a single stack, e.g. `make diff STACK=ecr.yaml`.
+diff:
+> @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" diff "$(ENV)$(if $(STACK),/$(STACK))"
+
+# Pass YES=1 to skip Sceptre's confirmation prompt (used by the deploy buildspec).
+launch:
+> @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" launch $(if $(YES),-y) "$(ENV)$(if $(STACK),/$(STACK))"
+
+# Workload boundary and dependent deployment roles stacks. Run locally with admin credentials;
+# the deploy project cannot update this stack group.
+bootstrap:
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> uv run --project infra --locked --no-active sceptre --dir infra --var-file="vars-$(ENV).yaml" launch $(if $(YES),-y) bootstrap
 
 # Dev instance lifecycle (nightly shutdown, keepalive) — see "Dev EC2 instance" in docs/setup.md.
 # The name must match ${AWS::StackName}-asg in infra/templates/ec2.j2.
-DEV_ASG := comet-dev-ec2-asg
-
 dev-up:
-> aws autoscaling set-desired-capacity --auto-scaling-group-name $(DEV_ASG) --desired-capacity 1
+> aws autoscaling set-desired-capacity --auto-scaling-group-name "comet-$(ENV)-ec2-asg" --desired-capacity 1
 
 dev-down:
-> aws autoscaling set-desired-capacity --auto-scaling-group-name $(DEV_ASG) --desired-capacity 0
+> aws autoscaling set-desired-capacity --auto-scaling-group-name "comet-$(ENV)-ec2-asg" --desired-capacity 0
 
 # Replace the running instance using the ASG's configured launch template version.
 dev-refresh:
-> aws autoscaling start-instance-refresh --auto-scaling-group-name $(DEV_ASG) --no-cli-pager
+> aws autoscaling start-instance-refresh --auto-scaling-group-name "comet-$(ENV)-ec2-asg" --no-cli-pager
 
 dev-keepalive:
-> aws autoscaling suspend-processes --auto-scaling-group-name $(DEV_ASG) --scaling-processes ScheduledActions
+> aws autoscaling suspend-processes --auto-scaling-group-name "comet-$(ENV)-ec2-asg" --scaling-processes ScheduledActions
 
 dev-autostop:
-> aws autoscaling resume-processes --auto-scaling-group-name $(DEV_ASG) --scaling-processes ScheduledActions
+> aws autoscaling resume-processes --auto-scaling-group-name "comet-$(ENV)-ec2-asg" --scaling-processes ScheduledActions
 
 dev-status:
-> aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $(DEV_ASG) \
+> aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "comet-$(ENV)-ec2-asg" \
     --query 'AutoScalingGroups[0].{desired:DesiredCapacity,instances:Instances[].{id:InstanceId,state:LifecycleState},suspended:SuspendedProcesses[].ProcessName}' \
     --output json --no-cli-pager
 

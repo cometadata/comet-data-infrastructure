@@ -1,6 +1,4 @@
-{#- Expire all but the newest `latest`-tagged image and all but the newest
-    `untagged_keep` untagged images (policy JSON in includes/). #}
-{%- macro lifecycle_policy(untagged_keep) %}
+{%- macro lifecycle_policy() %}
       LifecyclePolicy:
         LifecyclePolicyText: |
 {% filter indent(10, true) %}{% include 'includes/ecr-lifecycle-policy.json.j2' %}{% endfilter %}
@@ -14,68 +12,76 @@ Parameters:
     Type: String
 
 Resources:
-  Repository:
-    Type: 'AWS::ECR::Repository'
-    DeletionPolicy: 'Retain'
-    Properties:
-      RepositoryName: !Ref RepositoryName
-      ImageScanningConfiguration:
-        ScanOnPush: true
-{{- lifecycle_policy(3) }}
-
   BatchRepository:
     Type: 'AWS::ECR::Repository'
     DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
     Properties:
       RepositoryName: !Sub '${RepositoryName}-batch'
+      ImageTagMutability: 'IMMUTABLE'
       ImageScanningConfiguration:
         ScanOnPush: true
-{{- lifecycle_policy(3) }}
+{{- lifecycle_policy() }}
 
   MarpleRepository:
     Type: 'AWS::ECR::Repository'
     DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
     Properties:
       RepositoryName: !Sub '${RepositoryName}-marple'
+      ImageTagMutability: 'IMMUTABLE'
       ImageScanningConfiguration:
         ScanOnPush: true
-{{- lifecycle_policy(3) }}
+{{- lifecycle_policy() }}
 
-  # Keep more untagged images: re-pushing untags the digest the airflow task def still pins.
   AirflowRepository:
     Type: 'AWS::ECR::Repository'
     DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
     Properties:
       RepositoryName: !Sub '${RepositoryName}-airflow'
+      ImageTagMutability: 'IMMUTABLE'
       ImageScanningConfiguration:
         ScanOnPush: true
-{{- lifecycle_policy(10) }}
+{{- lifecycle_policy() }}
+
+  # BuildKit layer cache pushed by CI; mutable because the cache tags are overwritten
+  # on every build.
+  BuildCacheRepository:
+    Type: 'AWS::ECR::Repository'
+    DeletionPolicy: 'Retain'
+    UpdateReplacePolicy: 'Retain'
+    Properties:
+      RepositoryName: !Sub '${RepositoryName}-buildcache'
+      ImageTagMutability: 'MUTABLE'
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged cache layers",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 1
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
 
 Outputs:
-  RepositoryName:
-    Value: !Ref Repository
-  RepositoryArn:
-    Value: !GetAtt Repository.Arn
-  RepositoryUri:
-    Value: !GetAtt Repository.RepositoryUri
-
-  BatchRepositoryName:
-    Value: !Ref BatchRepository
   BatchRepositoryArn:
     Value: !GetAtt BatchRepository.Arn
-  BatchRepositoryUri:
-    Value: !GetAtt BatchRepository.RepositoryUri
 
-  MarpleRepositoryName:
-    Value: !Ref MarpleRepository
   MarpleRepositoryArn:
     Value: !GetAtt MarpleRepository.Arn
-  MarpleRepositoryUri:
-    Value: !GetAtt MarpleRepository.RepositoryUri
 
-  AirflowRepositoryName:
-    Value: !Ref AirflowRepository
   AirflowRepositoryArn:
     Value: !GetAtt AirflowRepository.Arn
-  AirflowRepositoryUri:
-    Value: !GetAtt AirflowRepository.RepositoryUri
+
+  BuildCacheRepositoryArn:
+    Value: !GetAtt BuildCacheRepository.Arn

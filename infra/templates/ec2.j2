@@ -3,6 +3,9 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: 'An EC2 instance for development and testing, managed by an Auto Scaling Group'
 
 Parameters:
+  Env:
+    Type: 'String'
+
   ImageId:
     Type: 'AWS::EC2::Image::Id'
 
@@ -39,6 +42,10 @@ Resources:
     Type: 'AWS::EC2::LaunchTemplate'
     Properties:
       LaunchTemplateName: !Sub '${AWS::StackName}-launch-template'
+      TagSpecifications:
+        - ResourceType: 'launch-template'
+          Tags:
+{% filter indent(12, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
       LaunchTemplateData:
         InstanceType: !Ref InstanceType
         ImageId: !Ref ImageId
@@ -63,10 +70,7 @@ Resources:
             Tags:
               - Key: 'Name'
                 Value: !Ref 'AWS::StackName'
-{% for key, value in sceptre_user_data.stack_tags.items() %}
-              - Key: '{{ key }}'
-                Value: '{{ value }}'
-{% endfor %}
+{% filter indent(14, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
 {% endfor %}
         UserData:
           Fn::Base64: !Sub |
@@ -147,13 +151,14 @@ Resources:
   EC2InstanceProfile:
     Type: 'AWS::IAM::InstanceProfile'
     Properties:
-      InstanceProfileName: !Sub '${AWS::StackName}-instance-profile'
+      Path: !Sub '/comet/${Env}/ec2/'
       Roles: [ !Ref EC2InstanceRole ]
 
   EC2InstanceRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      RoleName: !Sub '${AWS::StackName}-instance-role'
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/ec2/'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
