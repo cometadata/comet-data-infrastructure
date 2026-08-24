@@ -119,18 +119,6 @@ def stack_configs():
 
 
 @pytest.fixture(scope="session")
-def bootstrap_stack_configs():
-    """Render bootstrap Sceptre configs, keyed by stack path."""
-    variables = example_variables()
-    configs = {}
-    for path in sorted((CONFIG_DIR / "bootstrap").glob("*.yaml")):
-        source = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(path.read_text())
-        body = source.render(var=variables)
-        configs[path.name] = yaml.load(body, Loader=TaggedLoader)
-    return configs
-
-
-@pytest.fixture(scope="session")
 def alarm_parameter_targets(stack_configs, rendered_templates):
     """Map alarm parameters to referenced resources."""
     alarm_config = stack_configs["dev/monitoring/alarms.yaml"]

@@ -94,30 +94,6 @@ def get_latest(model_cls: type[Model], hash_key: str) -> Model | None:
     return next(model_cls.query(hash_key, scan_index_forward=False, limit=1), None)
 
 
-def scan_by_date_range(
-    model_cls: type[Model], *, start_date: str | None = None, end_date: str | None = None
-) -> list[Model]:
-    """Scan a table with an optional release_date range filter.
-
-    Args:
-        model_cls: PynamoDB model class to scan (must have a release_date attribute).
-        start_date: Optional ISO date lower bound (inclusive).
-        end_date: Optional ISO date upper bound (inclusive).
-
-    Returns:
-        List of model instances.
-    """
-    if start_date and end_date:
-        condition = model_cls.release_date.between(start_date, end_date)
-    elif start_date:
-        condition = model_cls.release_date >= start_date
-    elif end_date:
-        condition = model_cls.release_date <= end_date
-    else:
-        return list(model_cls.scan())
-    return list(model_cls.scan(filter_condition=condition))
-
-
 def get_latest_release(*, dataset: str) -> DatasetReleaseRecord | None:
     """Return the most recently published release record for a dataset.
 
