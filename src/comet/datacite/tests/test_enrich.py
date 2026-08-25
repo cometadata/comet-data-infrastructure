@@ -57,6 +57,7 @@ class TestEnrichResourceTypeGeneral:
             enrich_resource_type_general(
                 input_uri="s3://bucket/datacite_ingest/src-run/",
                 output_uri=ctx.target_uri,
+                source_release_date=["datacite=2026-01-02"],
                 rules_uri="s3://bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
                 provenance_uri="s3://bucket/enrichment-configs/resource-type-general-provenance.yaml",
             )
@@ -83,6 +84,8 @@ class TestEnrichResourceTypeGeneral:
                 str(rules_local),
                 "--provenance",
                 str(provenance_local),
+                "--source-release-date",
+                "datacite=2026-01-02",
                 "--output-writer-lanes",
                 "1",
             ]
@@ -110,6 +113,7 @@ class TestRorEnrichers:
         kwargs = dict(
             input_uri="s3://bucket/datacite_ingest/src-run/",
             output_uri=ctx.target_uri,
+            source_release_date=["datacite=2026-01-02", "ror=2026-01-15"],
             provenance_uri=provenance_uri,
             ror_service_url="http://ror-service:8000",
             output_writer_lanes=writer_lanes,
@@ -139,6 +143,10 @@ class TestRorEnrichers:
                 str(ctx.transform_dir),
                 "--provenance",
                 str(provenance_local),
+                "--source-release-date",
+                "datacite=2026-01-02",
+                "--source-release-date",
+                "ror=2026-01-15",
                 *ror_file_args,
                 "--ror-service-url",
                 "http://ror-service:8000",

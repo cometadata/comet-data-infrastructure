@@ -158,6 +158,37 @@ DAG_CASES = [
 ]
 
 
+class EnrichCase(NamedTuple):
+    factory: Callable
+    params: BaseDagParams
+    dataset: str
+    uses_ror: bool
+
+
+ENRICH_CASES = [
+    EnrichCase(
+        create_datacite_enrich_funders_dag,
+        DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
+        "datacite-funders",
+        uses_ror=True,
+    ),
+    EnrichCase(
+        create_datacite_enrich_affiliations_dag,
+        DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
+        "datacite-affiliations",
+        uses_ror=True,
+    ),
+    EnrichCase(
+        create_datacite_enrich_resource_type_general_dag,
+        DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
+        "datacite-resource-type-general",
+        uses_ror=False,
+    ),
+]
+
+ROR_CASES = [case for case in ENRICH_CASES if case.uses_ror]
+
+
 class TestDags:
     @pytest.mark.parametrize("case", DAG_CASES, ids=lambda c: c.dag_id)
     def test_dag_loads(self, case):
@@ -310,36 +341,39 @@ class TestPublishEnrichmentsDag:
         assert command[:4] == ["comet", "publish", "--source", "datacite"]
 
 
-class TestEnrichPersistRelease:
-    ENRICH_CASES = [
-        (
-            create_datacite_enrich_funders_dag,
-            DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
-            "datacite-funders",
-        ),
-        (
-            create_datacite_enrich_affiliations_dag,
-            DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
-            "datacite-affiliations",
-        ),
-        (
-            create_datacite_enrich_resource_type_general_dag,
-            DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
-            "datacite-resource-type-general",
-        ),
-    ]
+class TestEnrichFetchRorRelease:
+    @pytest.mark.parametrize("case", ROR_CASES, ids=lambda c: c.dataset)
+    def test_resolved_ror_release_includes_its_date_and_uri(self, case, mocker):
+        dag = case.factory("enrich_test", case.params)
+        module = inspect.getmodule(case.factory)
+        mocker.patch.object(
+            module,
+            "get_current_context",
+            return_value={
+                "params": {"bucket_name": "test-bucket", "ror_dag_id": "ror_ingest", "ror_release_date": None}
+            },
+        )
+        record = SimpleNamespace(release_date="2026-02-03", run_id="ror-run", file_name="ror.zip")
+        mock_resolve = mocker.patch.object(module, "resolve_release_record", return_value=record)
 
-    @pytest.mark.parametrize(("factory", "params", "dataset"), ENRICH_CASES, ids=[case[-1] for case in ENRICH_CASES])
-    def test_persist_release_stores_the_enrich_output_prefix(self, factory, params, dataset, mocker):
-        dag = factory("enrich_test", params)
+        resolved = dag.get_task("fetch_ror_release").python_callable()
+
+        mock_resolve.assert_called_once_with(dataset="ror", release_date=None)
+        assert resolved == {"release_date": "2026-02-03", "uri": "s3://test-bucket/ror_ingest/ror-run/ror.zip"}
+
+
+class TestEnrichPersistRelease:
+    @pytest.mark.parametrize("case", ENRICH_CASES, ids=lambda c: c.dataset)
+    def test_persist_release_stores_the_enrich_output_prefix(self, case, mocker):
+        dag = case.factory("enrich_test", case.params)
         mock_persist = mocker.patch.object(dataset_releases, "persist_discovered_release")
-        mocker.patch.object(inspect.getmodule(factory), "get_current_run_id", return_value="run-1")
+        mocker.patch.object(inspect.getmodule(case.factory), "get_current_run_id", return_value="run-1")
         release = DatasetRelease(release_date=datetime.date(2026, 1, 2))
 
         dag.get_task("persist_release").python_callable(release.to_dict())
 
         mock_persist.assert_called_once_with(
-            dataset=dataset,
+            dataset=case.dataset,
             release=release,
             run_id="run-1",
             source_prefix="enrich_test/run-1/",

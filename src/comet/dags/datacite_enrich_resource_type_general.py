@@ -94,6 +94,8 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
                     "/{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}/",
                     "--output-uri",
                     "s3://{{ params.bucket_name }}/" + run_prefix(dag_id, "{{ run_id }}"),
+                    "--source-release-date",
+                    "datacite={{ ti.xcom_pull(task_ids='fetch_datacite_release')['release_date'] }}",
                     "--rules-uri",
                     "s3://{{ params.bucket_name }}/{{ params.rules_path }}",
                     "--provenance-uri",

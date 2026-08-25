@@ -50,6 +50,17 @@ datacite/resource-type-general/...
 
 Each release folder contains the gzip-compressed JSON Lines shards and manifest written by `comet-enrich`.
 
+The manifest identifies the source releases used by the enrichment:
+
+```json
+{
+  "sources": {
+    "datacite": {"release_date": "2026-04-02"},
+    "ror": {"release_date": "2026-03-19"}
+  }
+}
+```
+
 ## Release index
 
 The `datacite/index.json` file lists the available releases for every DataCite enrichment method and identifies the latest release. Consumers can use this index to detect new releases without listing the contents of the bucket.

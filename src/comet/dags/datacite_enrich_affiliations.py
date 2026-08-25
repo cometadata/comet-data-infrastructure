@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from airflow import DAG  # noqa: TC002  # loader's get_type_hints() evaluates the `-> DAG` return at runtime
-from airflow.exceptions import AirflowException
 from airflow.providers.amazon.aws.operators.batch import BatchOperator
 from airflow.sdk import Param, dag, get_current_context, task
 
@@ -95,22 +94,16 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
             return record.to_dataset_release().to_dict()
 
         @task
-        def fetch_ror_release() -> str:
+        def fetch_ror_release() -> dict:
             run_params = get_current_context()["params"]
-            if run_params["ror_release_date"]:
-                record = dataset_releases.get_release(
-                    dataset=ROR_DATASET_NAME, release_date=run_params["ror_release_date"]
-                )
-                if record is None:
-                    raise AirflowException(f"No ROR release found for {run_params['ror_release_date']}")
-            else:
-                record = dataset_releases.get_latest_release(dataset=ROR_DATASET_NAME)
-                if record is None:
-                    raise AirflowException("No ROR release found in DynamoDB")
+            record = resolve_release_record(dataset=ROR_DATASET_NAME, release_date=run_params["ror_release_date"])
 
-            return s3_uri(run_params["bucket_name"], run_params["ror_dag_id"], record.run_id, record.file_name)
+            return {
+                "release_date": record.release_date,
+                "uri": s3_uri(run_params["bucket_name"], run_params["ror_dag_id"], record.run_id, record.file_name),
+            }
 
-        ror_data_uri = "{{ ti.xcom_pull(task_ids='fetch_ror_release') }}"
+        ror_data_uri = "{{ ti.xcom_pull(task_ids='fetch_ror_release')['uri'] }}"
 
         # Multi-container job: overrides go through ecs_properties_override.
         enrich = BatchOperator(
@@ -158,6 +151,10 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "/{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}/",
                                     "--output-uri",
                                     "s3://{{ params.bucket_name }}/" + run_prefix(dag_id, "{{ run_id }}"),
+                                    "--source-release-date",
+                                    "datacite={{ ti.xcom_pull(task_ids='fetch_datacite_release')['release_date'] }}",
+                                    "--source-release-date",
+                                    "ror={{ ti.xcom_pull(task_ids='fetch_ror_release')['release_date'] }}",
                                     "--provenance-uri",
                                     "s3://{{ params.bucket_name }}/{{ params.provenance_path }}",
                                     "--output-writer-lanes",
