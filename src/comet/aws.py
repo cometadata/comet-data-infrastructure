@@ -162,7 +162,7 @@ def delete_s3_prefix(
     In dry-run mode, matching objects are counted without being removed. The prefix
     must be non-root and end in ``/``.
 
-     Args:
+    Args:
         bucket_name: The bucket to delete from.
         prefix: The key prefix to delete, e.g. "datacite_ingest/run-1/".
         s3_client: Optional boto3 S3 client.
