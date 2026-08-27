@@ -5,6 +5,7 @@ from airflow.providers.amazon.aws.operators.batch import BatchOperator
 from airflow.sdk import Param, dag, get_current_context, task
 
 from comet.airflow.assets import DATACITE_FUNDERS_ASSET, DATACITE_RELEASE_ASSET
+from comet.airflow.notifications import alert_kwargs
 from comet.airflow.utils import (
     build_release_asset_metadata,
     get_current_run_id,
@@ -51,6 +52,7 @@ def create_datacite_enrich_funders_dag(dag_id: str, params: DataCiteEnrichFunder
 
     @dag(
         dag_id=dag_id,
+        description="Match DataCite funders to ROR IDs.",
         schedule=[DATACITE_RELEASE_ASSET],
         params={
             **enrich_trigger_params(params),
@@ -81,6 +83,7 @@ def create_datacite_enrich_funders_dag(dag_id: str, params: DataCiteEnrichFunder
             "batch_job_definition_name": batch_job_definition_name,
         },
         **params.dag_kwargs(),
+        **alert_kwargs(params.deadline_minutes),
     )
     def enrich_dag():
         @task

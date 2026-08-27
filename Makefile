@@ -85,7 +85,8 @@ bump-airflow:
 >     -o /tmp/airflow-constraints.txt
 > uv add --optional airflow --no-sync -c /tmp/airflow-constraints.txt \
 >     "apache-airflow[amazon,postgres,standard,fab]==$(AIRFLOW_VERSION)" \
->     "apache-airflow-providers-amazon[aiobotocore]"
+>     "apache-airflow-providers-amazon[aiobotocore]" \
+>     "apache-airflow-providers-slack>=9.10.2,<10"
 
 check-airflow-version:
 > @locked=$$(uv export --locked --no-dev --no-emit-project --no-hashes --no-annotate --extra airflow | grep '^apache-airflow==' | sed -E 's/^apache-airflow==([^ \\]+).*/\1/'); \

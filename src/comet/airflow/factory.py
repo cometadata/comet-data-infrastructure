@@ -20,8 +20,8 @@ class BaseDagParams(BaseModel):
         end_date: Last date the DAG is eligible to run; ``None`` for indefinite.
         catchup: Whether to backfill from ``start_date`` when the scheduler first sees the DAG.
         tags: Tags shown in the Airflow UI.
-        description: Free-text description shown in the Airflow UI.
         max_active_runs: Maximum concurrent DAG runs; ``None`` for Airflow's default.
+        deadline_minutes: Minutes from queueing before the DAG sends a deadline alert.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -30,8 +30,8 @@ class BaseDagParams(BaseModel):
     end_date: datetime | None = None
     catchup: bool = False
     tags: list[str] = Field(default_factory=list)
-    description: str | None = None
     max_active_runs: int | None = None
+    deadline_minutes: int = Field(default=90, gt=0)
 
     def dag_kwargs(self) -> dict[str, Any]:
         """Build the common kwargs to forward into the airflow.DAG constructor (excluding schedule).
@@ -47,6 +47,5 @@ class BaseDagParams(BaseModel):
             "end_date": self.end_date,
             "catchup": self.catchup,
             "tags": list(self.tags),
-            "description": self.description,
             "max_active_runs": self.max_active_runs,
         }

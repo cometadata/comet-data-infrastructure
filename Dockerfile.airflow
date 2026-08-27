@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/home/airflow/.cache/uv,uid=50000,gid=0 \
 
 # Check dependency consistency and confirm the overlay did not change Airflow's version.
 RUN uv pip check \
-    && python -c "import airflow; import airflow.providers.amazon; assert airflow.__version__ == '${AIRFLOW_VERSION}', airflow.__version__"
+    && python -c "import airflow; import airflow.providers.amazon; import airflow.providers.slack; assert airflow.__version__ == '${AIRFLOW_VERSION}', airflow.__version__"
 
 # Entrypoint derives env and dispatches by role.
 COPY --chown=airflow:0 docker/airflow-entrypoint.sh /opt/comet/bin/airflow-entrypoint.sh

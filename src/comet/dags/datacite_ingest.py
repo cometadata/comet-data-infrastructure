@@ -9,6 +9,7 @@ import pendulum
 
 from comet.airflow import BaseDagParams
 from comet.airflow.assets import DATACITE_RELEASE_ASSET
+from comet.airflow.notifications import alert_kwargs, optional_slack_date, slack_notifier
 from comet.airflow.utils import (
     build_release_asset_metadata,
     get_airflow_connection,
@@ -49,7 +50,7 @@ class DataCiteIngestParams(BaseDagParams):
 
 
 def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG:
-    """Build a DAG that submits a single Batch job to ingest a new ROR release.
+    """Build a DAG that submits a single Batch job to ingest a new DataCite release.
 
     Args:
         dag_id: Airflow DAG ID.
@@ -61,6 +62,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
 
     @dag(
         dag_id=dag_id,
+        description="Ingest new DataCite releases.",
         schedule="@daily",
         params={
             "datacite_bucket_name": Param(
@@ -83,6 +85,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
             "batch_job_definition_name": batch_job_definition_name,
         },
         **params.dag_kwargs(),
+        **alert_kwargs(params.deadline_minutes),
     )
     def datacite_dag():
         @task
@@ -153,7 +156,18 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
                 source_prefix=run_prefix(dag_id, run_id),
             )
 
-        @task(outlets=[DATACITE_RELEASE_ASSET])
+        @task(
+            outlets=[DATACITE_RELEASE_ASSET],
+            on_success_callback=slack_notifier(
+                ":large_green_circle:",
+                "DataCite release ingested",
+                "{% set release = ti.xcom_pull(task_ids='fetch_release') %}"
+                "*Release date:* {{ release.release_date }}\n"
+                "*Files:* {{ release.metadata.file_count }}\n"
+                "*Size:* {{ release.metadata.total_size_bytes | filesizeformat }}\n"
+                f"*Completed:* {optional_slack_date('ti.end_date')}",
+            ),
+        )
         def publish_release_asset(release: dict):
             release = DatasetRelease.from_dict(release)
             yield build_release_asset_metadata(

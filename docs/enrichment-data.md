@@ -96,4 +96,3 @@ The `datacite/index.json` file lists the available releases for every DataCite e
 - Download `datacite/index.json` periodically.
 - Compare each method's `latest.release_date` with the last release date you ingested.
 - If a newer release is available, download the shards from the `enrichments/` directory under `latest.path`.
-- The `manifest.json` file contains metadata describing the enrichment run.

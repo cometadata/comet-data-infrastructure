@@ -67,6 +67,9 @@ hf_credentials_secret_arn: ''
 # in docs/setup.md.
 fernet_secret_arn: ''
 
+# Slack webhook connection secret ARN. See "Configure Slack alerts" in docs/setup.md.
+slack_webhook_secret_arn: ''
+
 # Outputs of the two bootstrap stacks (`make bootstrap`). The boundary caps every COMET workload
 # role, the runner role executes the deploy project, and CloudFormation assumes the service role to
 # create environment resources. See "Deployment permissions" in docs/setup.md.

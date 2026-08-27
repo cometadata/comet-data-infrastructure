@@ -42,6 +42,8 @@ The four services and the init task:
 
 The scheduler uses the [AWS ECS Executor](https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/executors/ecs-executor.html) to run each Airflow task as a one-off Fargate task that exits when the task finishes. Workers are not given any secrets; they read connections, variables, and state through the Task Execution API. Batch jobs are submitted with the `BatchOperator` in deferrable mode, which lets Airflow submit a job and wait for it to complete without using a worker while the job runs.
 
+Slack notifications use the `slack_default` connection supplied to Fargate workers through their environment. Failures and progress updates are task callbacks; deadline notifications launch a separate worker with `SyncCallback`.
+
 The deployment also relies on several supporting AWS services:
 
 * RDS PostgreSQL stores the Airflow metadata database.
@@ -110,7 +112,6 @@ The permissions boundary is attached to every IAM role created by the environmen
 * RDS: forward low-storage and configuration-change events to the monitoring SNS topic.
 * EC2 and Fargate worker tasks:
   * Alarm when tasks exceeds the age threshold for two consecutive five-minute periods.
-  * Alarm when task launches in the previous ten minutes exceed the threshold for two consecutive five-minute periods.
   * Alarm when task launches in the previous ten minutes exceed the threshold for two consecutive five-minute periods.
 * Airflow ECS services:
   * Alarm when fewer service tasks are running than expected for two consecutive five-minute periods.

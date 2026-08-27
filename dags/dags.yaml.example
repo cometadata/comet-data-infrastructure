@@ -5,46 +5,71 @@
 dags:
   - dag_id: ror_ingest
     factory: comet.dags.ror_ingest.create_ror_ingest_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [ror, ingest]
+      deadline_minutes: 15
       bucket_name: <your-s3-bucket>
 
   - dag_id: datacite_ingest
     factory: comet.dags.datacite_ingest.create_datacite_ingest_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [datacite, ingest]
+      deadline_minutes: 90
       bucket_name: <your-s3-bucket>
       datacite_bucket_name: monthly-datafile.datacite.org
       datacite_bucket_region: eu-west-1
+      datacite_conn_name: datacite
 
   - dag_id: datacite_enrich_resource_type_general
     factory: comet.dags.datacite_enrich_resource_type_general.create_datacite_enrich_resource_type_general_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [datacite, enrich]
+      deadline_minutes: 90
       bucket_name: <your-s3-bucket>
+      datacite_dag_id: datacite_ingest
 
   - dag_id: datacite_enrich_funders
     factory: comet.dags.datacite_enrich_funders.create_datacite_enrich_funders_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [datacite, enrich]
+      deadline_minutes: 60
       bucket_name: <your-s3-bucket>
+      datacite_dag_id: datacite_ingest
+      ror_dag_id: ror_ingest
 
   - dag_id: datacite_enrich_affiliations
     factory: comet.dags.datacite_enrich_affiliations.create_datacite_enrich_affiliations_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [datacite, enrich]
+      deadline_minutes: 90
       bucket_name: <your-s3-bucket>
+      datacite_dag_id: datacite_ingest
+      ror_dag_id: ror_ingest
 
   - dag_id: datacite_publish
     factory: comet.dags.publish_enrichments.create_publish_enrichments_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [datacite, publish]
+      max_active_runs: 1
+      deadline_minutes: 15
       source: datacite
       bucket_name: <your-s3-bucket>
       hf_bucket_name: comet-enrichments
@@ -52,9 +77,13 @@ dags:
 
   - dag_id: prune_releases
     factory: comet.dags.prune_releases.create_prune_releases_dag
+    enabled: true
     params:
       start_date: 2026-01-01
+      catchup: false
       tags: [prune]
+      max_active_runs: 1
+      deadline_minutes: 15
       bucket_name: <your-s3-bucket>
       producer_dag_ids:
         - ror_ingest
@@ -62,3 +91,12 @@ dags:
         - datacite_enrich_resource_type_general
         - datacite_enrich_funders
         - datacite_enrich_affiliations
+
+  - dag_id: slack_alert_test
+    factory: comet.dags.slack_alert_test.create_slack_alert_test_dag
+    enabled: false
+    params:
+      start_date: 2026-01-01
+      catchup: false
+      tags: [slack, test]
+      deadline_minutes: 2

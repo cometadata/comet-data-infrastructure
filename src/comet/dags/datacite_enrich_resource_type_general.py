@@ -5,6 +5,7 @@ from airflow.providers.amazon.aws.operators.batch import BatchOperator
 from airflow.sdk import Param, dag, get_current_context, task
 
 from comet.airflow.assets import DATACITE_RELEASE_ASSET, DATACITE_RESOURCE_TYPE_GENERAL_ASSET
+from comet.airflow.notifications import alert_kwargs
 from comet.airflow.utils import (
     build_release_asset_metadata,
     get_current_run_id,
@@ -45,6 +46,7 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
 
     @dag(
         dag_id=dag_id,
+        description="Reclassify DataCite resourceTypeGeneral values.",
         schedule=[DATACITE_RELEASE_ASSET],
         params={
             **enrich_trigger_params(params),
@@ -68,6 +70,7 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
             "batch_job_definition_name": batch_job_definition_name,
         },
         **params.dag_kwargs(),
+        **alert_kwargs(params.deadline_minutes),
     )
     def enrich_dag():
         @task

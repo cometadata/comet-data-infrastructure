@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import NamedTuple
 
 from airflow import DAG
+from airflow.providers.slack.notifications.slack_webhook import SlackWebhookNotifier
 from airflow.sdk import AssetAny
 from airflow.sdk.exceptions import AirflowException, AirflowSkipException
 import pytest
@@ -44,6 +45,7 @@ from comet.dags.prune_releases import PruneReleasesParams, create_prune_releases
 import comet.dags.publish_enrichments as publish_enrichments
 from comet.dags.publish_enrichments import PublishEnrichmentsParams, create_publish_enrichments_dag
 from comet.dags.ror_ingest import RorIngestParams, create_ror_ingest_dag
+from comet.dags.slack_alert_test import create_slack_alert_test_dag
 import comet.dynamodb_store as dataset_releases
 from comet.model.dataset_version_model import DatasetRelease
 
@@ -51,6 +53,8 @@ REPO_ROOT = Path(comet.__file__).parents[2]
 EXAMPLE_CONFIG = REPO_ROOT / "dags" / "dags.yaml.example"
 
 START_DATE = datetime.datetime(2026, 1, 1)
+COMPLETED = datetime.datetime(2026, 8, 30, 23, 20, 42, tzinfo=datetime.UTC)
+COMPLETED_TOKEN = "<!date^1788132042^{date_short_pretty} at {time_secs}|2026-08-30 23:20:42+00:00>"
 HF_ENDPOINT_URL = "https://s3.hf.co/test-namespace"
 PRODUCER_DAG_IDS = [
     "ror_ingest",
@@ -86,9 +90,11 @@ class DagCase(NamedTuple):
     dag_id: str
     factory: Callable
     params: BaseDagParams
-    schedule: str | list
+    schedule: str | list | AssetAny | None
     # Expected downstream task ids per task; the keys double as the expected task set.
     edges: dict[str, set[str]]
+    # Task that sends a success notification, if any.
+    success_task: str | None = None
 
 
 DAG_CASES = [
@@ -103,6 +109,7 @@ DAG_CASES = [
             "persist_discovered_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
+        success_task="publish_release_asset",
     ),
     DagCase(
         "datacite_ingest",
@@ -120,6 +127,7 @@ DAG_CASES = [
             "persist_discovered_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
+        success_task="publish_release_asset",
     ),
     DagCase(
         "datacite_enrich_resource_type_general",
@@ -161,6 +169,7 @@ DAG_CASES = [
             "resolve_releases": {"publish"},
             "publish": set(),
         },
+        success_task="publish",
     ),
     DagCase(
         "prune_releases",
@@ -174,6 +183,7 @@ DAG_CASES = [
         {
             "prune": set(),
         },
+        success_task="prune",
     ),
     DagCase(
         "datacite_enrich_affiliations",
@@ -187,6 +197,17 @@ DAG_CASES = [
             "persist_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
+    ),
+    DagCase(
+        "slack_alert_test",
+        create_slack_alert_test_dag,
+        BaseDagParams(start_date=START_DATE, deadline_minutes=2),
+        None,
+        {
+            "wait_then_fail": set(),
+            "succeed": set(),
+        },
+        success_task="succeed",
     ),
 ]
 
@@ -228,6 +249,98 @@ class TestDags:
         dag = case.factory(case.dag_id, case.params)
         assert isinstance(dag, DAG)
         assert dag.dag_id == case.dag_id
+
+    @pytest.mark.parametrize("case", DAG_CASES, ids=lambda c: c.dag_id)
+    def test_dag_has_alerts(self, case):
+        dag = case.factory(case.dag_id, case.params)
+
+        for task in dag.tasks:
+            assert len(task.on_failure_callback) == 1
+            assert isinstance(task.on_failure_callback[0], SlackWebhookNotifier)
+        success_tasks = [task.task_id for task in dag.tasks if task.on_success_callback]
+        assert success_tasks == ([case.success_task] if case.success_task else [])
+        assert dag.deadline[0].interval == datetime.timedelta(minutes=case.params.deadline_minutes)
+        assert dag.deadline[0].callback.path == "comet.airflow.notifications.DeadlineSlackNotifier"
+
+    @pytest.mark.parametrize(
+        "dag_id, task_id, params, xcom_task_ids, xcom, title, body",
+        [
+            (
+                "ror_ingest",
+                "publish_release_asset",
+                {},
+                "fetch_release",
+                {"release_date": "2026-08-01", "file_name": "v1.71-2026-08-01-ror-data.zip"},
+                "ROR release ingested",
+                "*Release date:* 2026-08-01\n*File:* v1.71-2026-08-01-ror-data.zip\n",
+            ),
+            (
+                "datacite_ingest",
+                "publish_release_asset",
+                {},
+                "fetch_release",
+                {"release_date": "2026-08-01", "metadata": {"file_count": "1200", "total_size_bytes": "123456789012"}},
+                "DataCite release ingested",
+                "*Release date:* 2026-08-01\n*Files:* 1200\n*Size:* 123.5 GB\n",
+            ),
+            (
+                "datacite_publish",
+                "publish",
+                {"hf_bucket_name": "hf-bucket"},
+                "resolve_releases",
+                {
+                    "release_date": "2026-08-01",
+                    "source_uris": {"datacite-funders": "s3://b/x/", "datacite-affiliations": "s3://b/y/"},
+                },
+                "Enrichments published to Hugging Face",
+                "*Release date:* 2026-08-01\n*Datasets:* datacite-affiliations, datacite-funders\n*Bucket:* hf-bucket\n",
+            ),
+            (
+                "prune_releases",
+                "prune",
+                {"dry_run": False},
+                None,
+                {"prefixes": 3, "records": 5},
+                "Releases pruned",
+                "*Prefixes deleted:* 3\n*Records marked:* 5\n*Dry run:* no\n",
+            ),
+            (
+                "prune_releases",
+                "prune",
+                {"dry_run": True},
+                None,
+                {"prefixes": 3, "records": 5},
+                "Release prune dry run",
+                "*Prefixes that would be deleted:* 3\n*Records that would be marked:* 5\n*Dry run:* yes\n",
+            ),
+        ],
+        ids=["ror_ingest", "datacite_ingest", "datacite_publish", "prune_releases", "prune_releases-dry-run"],
+    )
+    def test_success_message_renders(self, dag_id, task_id, params, xcom_task_ids, xcom, title, body):
+        case = next(case for case in DAG_CASES if case.dag_id == dag_id)
+        dag = case.factory(case.dag_id, case.params)
+        notifier = dag.get_task(task_id).on_success_callback[0]
+        context = {
+            "dag": dag,
+            "params": params,
+            "ti": SimpleNamespace(
+                task_id=task_id,
+                end_date=COMPLETED,
+                log_url="http://localhost/log",
+                # Fail if the template pulls from the wrong task.
+                xcom_pull=lambda task_ids=None: {xcom_task_ids: xcom}[task_ids],
+            ),
+        }
+
+        notifier.render_template_fields(context)
+
+        assert notifier.text == (
+            f":large_green_circle: [test] *{title}*\n\n"
+            f"`{dag_id}.{task_id}`\n\n"
+            f"{body}"
+            f"*Completed:* {COMPLETED_TOKEN}\n\n"
+            "<http://localhost/log|View logs>"
+        )
 
     @pytest.mark.parametrize("case", DAG_CASES, ids=lambda c: c.dag_id)
     def test_dag_structure(self, case):

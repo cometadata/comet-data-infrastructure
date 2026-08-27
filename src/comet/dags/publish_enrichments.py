@@ -9,6 +9,7 @@ from airflow.sdk.exceptions import AirflowException
 from pydantic import field_validator
 
 from comet.airflow import BaseDagParams
+from comet.airflow.notifications import alert_kwargs, optional_slack_date, slack_notifier
 from comet.airflow.utils import resolve_release_record, skip_asset_fail_manual
 from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name, s3_uri
 from comet.constants import enrichments_for_source
@@ -59,6 +60,7 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
 
     @dag(
         dag_id=dag_id,
+        description="Publish enrichment releases to Hugging Face.",
         schedule=AssetAny(*(Asset(dataset) for dataset in datasets)),
         params={
             "hf_bucket_name": Param(
@@ -97,6 +99,7 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
             "batch_job_definition_name": batch_job_definition_name,
         },
         **params.dag_kwargs(),
+        **alert_kwargs(params.deadline_minutes),
     )
     def publish_dag():
         @task
@@ -130,6 +133,15 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
         resolved_xcom = "ti.xcom_pull(task_ids='resolve_releases')"
         publish = BatchOperator(
             task_id="publish",
+            on_success_callback=slack_notifier(
+                ":large_green_circle:",
+                "Enrichments published to Hugging Face",
+                "{% set resolved = " + resolved_xcom + " %}"
+                "*Release date:* {{ resolved.release_date }}\n"
+                "*Datasets:* {{ resolved.source_uris | sort | join(', ') }}\n"
+                "*Bucket:* {{ params.hf_bucket_name }}\n"
+                f"*Completed:* {optional_slack_date('ti.end_date')}",
+            ),
             job_name="{{ batch_job_name(get_env(), 'publish') }}",
             job_queue="{{ batch_job_queue_name(get_env(), 'publish') }}",
             job_definition="{{ batch_job_definition_name(get_env(), 'publish') }}",

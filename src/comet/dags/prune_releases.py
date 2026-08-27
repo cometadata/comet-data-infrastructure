@@ -11,6 +11,7 @@ from pydantic import field_validator
 
 from comet import pruning
 from comet.airflow import BaseDagParams
+from comet.airflow.notifications import alert_kwargs, optional_slack_date, slack_notifier
 from comet.aws import delete_s3_prefix, first_object_timestamp, list_run_prefixes
 from comet.dynamodb_store import list_all_releases, mark_release_pruned
 
@@ -48,6 +49,7 @@ def create_prune_releases_dag(dag_id: str, params: PruneReleasesParams) -> DAG:
 
     @dag(
         dag_id=dag_id,
+        description="Prune expired and orphaned release data from S3.",
         schedule="0 0 15 * *",
         params={
             "orphan_grace_days": Param(
@@ -65,10 +67,26 @@ def create_prune_releases_dag(dag_id: str, params: PruneReleasesParams) -> DAG:
             ),
         },
         **params.dag_kwargs(),
+        **alert_kwargs(params.deadline_minutes),
     )
     def prune_dag():
-        @task
-        def prune():
+        @task(
+            on_success_callback=slack_notifier(
+                ":large_green_circle:",
+                "{{ 'Release prune dry run' if params.dry_run else 'Releases pruned' }}",
+                "{% set summary = ti.xcom_pull() %}"
+                "{% if params.dry_run %}"
+                "*Prefixes that would be deleted:* {{ summary.prefixes }}\n"
+                "*Records that would be marked:* {{ summary.records }}\n"
+                "{% else %}"
+                "*Prefixes deleted:* {{ summary.prefixes }}\n"
+                "*Records marked:* {{ summary.records }}\n"
+                "{% endif %}"
+                "*Dry run:* {{ 'yes' if params.dry_run else 'no' }}\n"
+                f"*Completed:* {optional_slack_date('ti.end_date')}",
+            )
+        )
+        def prune() -> dict:
             run_params = get_current_context()["params"]
 
             s3_client = boto3.client("s3")
@@ -104,6 +122,10 @@ def create_prune_releases_dag(dag_id: str, params: PruneReleasesParams) -> DAG:
                     s3_client=s3_client,
                     dry_run=run_params["dry_run"],
                 )
+            return {
+                "prefixes": len(candidates),
+                "records": sum(len(candidate.records) for candidate in candidates),
+            }
 
         prune()
 
