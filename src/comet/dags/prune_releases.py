@@ -72,7 +72,8 @@ def create_prune_releases_dag(dag_id: str, params: PruneReleasesParams) -> DAG:
             run_params = get_current_context()["params"]
 
             s3_client = boto3.client("s3")
-            # Include unregistered datasets because their records still protect prefixes.
+            # Load every release record so prefixes belonging to unknown or legacy
+            # datasets are not mistaken for orphaned runs.
             records = list_all_releases()
             run_prefixes = list_run_prefixes(
                 params.bucket_name,
