@@ -53,7 +53,9 @@ class TestResolveReleaseRecord:
         get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value="rec")
         get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release")
 
-        record = resolve_release_record(("datacite", "2026-06-03"), dataset="datacite", release_date="ignored")
+        record = resolve_release_record(
+            dataset="datacite", release_date="ignored", triggering_key=("datacite", "2026-06-03")
+        )
 
         assert record == "rec"
         get_release.assert_called_once_with(dataset="datacite", release_date="2026-06-03")
@@ -63,7 +65,7 @@ class TestResolveReleaseRecord:
         get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value="rec")
         get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release")
 
-        record = resolve_release_record(None, dataset="datacite", release_date="2026-06-01")
+        record = resolve_release_record(dataset="datacite", release_date="2026-06-01")
 
         assert record == "rec"
         get_release.assert_called_once_with(dataset="datacite", release_date="2026-06-01")
@@ -73,7 +75,7 @@ class TestResolveReleaseRecord:
         get_release = mocker.patch("comet.airflow.utils.dataset_releases.get_release")
         get_latest = mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release", return_value="rec")
 
-        record = resolve_release_record(None, dataset="datacite", release_date=None)
+        record = resolve_release_record(dataset="datacite", release_date=None)
 
         assert record == "rec"
         get_latest.assert_called_once_with(dataset="datacite")
@@ -82,4 +84,4 @@ class TestResolveReleaseRecord:
     def test_raises_when_no_release_found(self, mocker):
         mocker.patch("comet.airflow.utils.dataset_releases.get_latest_release", return_value=None)
         with pytest.raises(AirflowException, match="No release found"):
-            resolve_release_record(None, dataset="datacite", release_date=None)
+            resolve_release_record(dataset="datacite", release_date=None)

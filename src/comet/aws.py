@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError
 from comet.utils import local_path, run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
 
     from botocore.client import BaseClient
 
@@ -33,6 +33,19 @@ def s3_uri(bucket_name: str, *parts: str) -> str:
     """
     path = "/".join(parts)
     return f"s3://{bucket_name}/{path}" if path else f"s3://{bucket_name}"
+
+
+def run_prefix(dag_id: str, run_id: str) -> str:
+    """Return the key prefix a DAG run writes its output under.
+
+    Args:
+        dag_id: The DAG ID.
+        run_id: The run ID, or a Jinja placeholder that renders it.
+
+    Returns:
+        The key prefix with a trailing slash, e.g. "datacite_enrich_funders/{run_id}/".
+    """
+    return f"{dag_id}/{run_id}/"
 
 
 def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
@@ -89,7 +102,7 @@ def s3_uri_has_files(
     return "Contents" in resp
 
 
-def s5cmd_command(*args: str) -> list[str]:
+def s5cmd_command(*args: str, endpoint_url: str | None = None) -> list[str]:
     """Build an s5cmd argv with quiet logging and an end-of-run summary.
 
     ``--log error`` drops s5cmd's default per-object operation lines (otherwise streamed one
@@ -98,23 +111,35 @@ def s5cmd_command(*args: str) -> list[str]:
 
     Args:
         *args: The s5cmd subcommand and its arguments (e.g. ``"cp", src, dst``).
+        endpoint_url: Optional S3-compatible endpoint (e.g. a Hugging Face bucket);
+            None targets AWS S3.
 
     Returns:
         The full s5cmd argv, with global flags before the subcommand.
     """
-    return ["s5cmd", "--log", "error", "--stat", *args]
+    endpoint_args = ["--endpoint-url", endpoint_url] if endpoint_url else []
+    return ["s5cmd", "--log", "error", "--stat", *endpoint_args, *args]
 
 
-def clean_s3_prefix(s3_uri: str):
+def clean_s3_prefix(
+    s3_uri: str,
+    *,
+    s3_client: BaseClient | None = None,
+    endpoint_url: str | None = None,
+    env: Mapping[str, str] | None = None,
+):
     """Delete all objects at the specified S3 URI prefix.
 
     Args:
         s3_uri: The S3 URI prefix to clean.
+        s3_client: Optional boto3 S3 client used to check the prefix.
+        endpoint_url: Optional S3-compatible endpoint; None targets AWS S3.
+        env: Optional environment for the delete subprocess.
     """
     logger.info(f"Checking and cleaning S3 URI: {s3_uri}")
-    if s3_uri_has_files(s3_uri):
+    if s3_uri_has_files(s3_uri, s3_client=s3_client):
         logger.info(f"Objects found at {s3_uri}, deleting...")
-        run_process(s5cmd_command("rm", f"{s3_uri}*"))
+        run_process(s5cmd_command("rm", f"{s3_uri}*", endpoint_url=endpoint_url), env=env)
     else:
         logger.info(f"No objects found at {s3_uri}")
 
@@ -124,6 +149,9 @@ def upload_files_to_s3(
     s3_uri: str,
     glob_pattern: str = "*",
     exclude_patterns: tuple[str, ...] = (),
+    *,
+    endpoint_url: str | None = None,
+    env: Mapping[str, str] | None = None,
 ):
     """Upload files from a local directory to S3.
 
@@ -132,10 +160,13 @@ def upload_files_to_s3(
         s3_uri: The destination S3 URI.
         glob_pattern: Glob pattern to match files in the local directory.
         exclude_patterns: Relative glob patterns to exclude from the upload.
+        endpoint_url: Optional S3-compatible endpoint; None targets AWS S3.
+        env: Optional environment for the upload subprocess.
     """
     logger.info(f"Uploading from {local_dir}/{glob_pattern} to {s3_uri}")
     exclude_args = [arg for pattern in exclude_patterns for arg in ("--exclude", pattern)]
-    run_process(s5cmd_command("cp", *exclude_args, f"{local_dir}/{glob_pattern}", s3_uri))
+    command = s5cmd_command("cp", *exclude_args, f"{local_dir}/{glob_pattern}", s3_uri, endpoint_url=endpoint_url)
+    run_process(command, env=env)
 
 
 def upload_file_to_s3(file: pathlib.Path, s3_uri: str):

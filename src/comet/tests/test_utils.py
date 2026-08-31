@@ -12,7 +12,7 @@ class TestEnvHelpers:
     @pytest.mark.parametrize(
         "func, var",
         [
-            (get_env, "AWS_ENV"),
+            (get_env, "COMET_ENV"),
             (get_region, "AWS_REGION"),
         ],
     )
@@ -23,7 +23,7 @@ class TestEnvHelpers:
     @pytest.mark.parametrize(
         "func, var",
         [
-            (get_env, "AWS_ENV"),
+            (get_env, "COMET_ENV"),
             (get_region, "AWS_REGION"),
         ],
     )

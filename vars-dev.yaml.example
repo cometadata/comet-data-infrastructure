@@ -56,13 +56,11 @@ instance_docker_buildx_version: '0.35.0'
 instance_shutdown_hour: 22
 instance_shutdown_timezone: America/Los_Angeles
 
-# Secrets Manager ARN holding DataCite credentials, consumed by the
-# download-datacite AWS Batch job (config/dev/batch-jobs.yaml). Create the secret
-# out-of-band with keys `account_id` and `password`, e.g.:
-#   aws secretsmanager create-secret --name comet-dev-batch-datacite-credentials \
-#     --secret-string '{"account_id":"<id>","password":"<password>"}'
-# Use the default aws/secretsmanager encryption key.
+# See "DataCite credentials" in docs/setup.md.
 datacite_credentials_secret_arn: ''
+
+# See "Hugging Face publish credentials" in docs/setup.md.
+hf_credentials_secret_arn: ''
 
 # ARN of the Airflow Fernet key secret. CloudFormation does not manage this secret;
 # use the default aws/secretsmanager encryption key and see "Rotating the Fernet key"

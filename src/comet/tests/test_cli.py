@@ -5,6 +5,9 @@ import sys
 import textwrap
 
 import pyarrow.parquet as pq
+import pytest
+
+from comet.cli import app
 
 SAMPLE_XML = textwrap.dedent("""\
     <?xml version='1.0' standalone='yes'?>
@@ -23,6 +26,39 @@ SAMPLE_XML = textwrap.dedent("""\
       </file>
     </arXivSRC>
 """)
+
+
+class TestPublishCommand:
+    def test_invokes_publish_releases_with_parsed_args(self, mocker):
+        mock_publish = mocker.patch("comet.exports.publish_releases")
+        mocker.patch("comet.cli.setup_logging")
+
+        # cyclopts calls sys.exit(0) once the command returns.
+        with pytest.raises(SystemExit) as exc_info:
+            app(
+                [
+                    "publish",
+                    "--source",
+                    "datacite",
+                    "--release-date",
+                    "2026-01-02",
+                    "--source-uris",
+                    '{"datacite-funders": "s3://my-bucket/datacite_enrich_funders/run-1/"}',
+                    "--hf-bucket",
+                    "my-hf-bucket",
+                    "--hf-endpoint-url",
+                    "https://s3.example.com",
+                ]
+            )
+        assert exc_info.value.code == 0
+
+        mock_publish.assert_called_once_with(
+            source="datacite",
+            release_date="2026-01-02",
+            source_uris={"datacite-funders": "s3://my-bucket/datacite_enrich_funders/run-1/"},
+            hf_bucket="my-hf-bucket",
+            endpoint_url="https://s3.example.com",
+        )
 
 
 class TestManifestParquetCommand:

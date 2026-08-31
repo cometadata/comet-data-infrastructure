@@ -20,7 +20,7 @@ class DatasetReleaseMeta(type):
     """Metaclass that resolves the PynamoDB table config at runtime, not import.
 
     PynamoDB reads ``table_name`` only when an operation runs, so exposing it as a class
-    property defers ``AWS_ENV``/``AWS_REGION`` validation to runtime — a missing env var then
+    property defers ``COMET_ENV``/``AWS_REGION`` validation to runtime — a missing env var then
     fails loudly on the first operation instead of producing a wrong table name at import.
     ``region`` returns the raw ``AWS_REGION`` without raising (PynamoDB reads it at class
     creation, which must not blow up); the loud check lives in ``table_name``.
@@ -33,7 +33,7 @@ class DatasetReleaseMeta(type):
 
     @property
     def table_name(cls) -> str:
-        """Return the dataset-releases table name, validating AWS_ENV/AWS_REGION at runtime."""
+        """Return the dataset-releases table name, validating COMET_ENV/AWS_REGION at runtime."""
         get_region()
         return f"comet-{get_env()}-dataset-releases"
 
@@ -49,7 +49,11 @@ class DatasetReleaseRecord(Model):
         file_hash: MD5 checksum for the file, if applicable.
         run_id: Identifier of the run that ingested this release
             (matches the S3 prefix segment under ``{dataset}-download/``).
+        source_prefix: Key prefix on the data bucket of the run output that produced this release.
         metadata: Arbitrary extra key/value pairs.
+        release_type: Kind of published release ("full"); None until published.
+        published_at: ISO datetime string of the last publish; None until published.
+        export_path: Key prefix of the published copy on the export bucket.
         created_at: ISO datetime string of record creation.
         updated_at: ISO datetime string of last update.
     """
@@ -65,7 +69,11 @@ class DatasetReleaseRecord(Model):
     download_url = UnicodeAttribute(null=True)
     file_hash = UnicodeAttribute(null=True)
     run_id = UnicodeAttribute(null=True)
+    source_prefix = UnicodeAttribute(null=True)
     metadata = MapAttribute(default=dict)
+    release_type = UnicodeAttribute(null=True)
+    published_at = UnicodeAttribute(null=True)
+    export_path = UnicodeAttribute(null=True)
     created_at = UnicodeAttribute()
     updated_at = UnicodeAttribute()
 
@@ -91,7 +99,7 @@ def get_latest(model_cls: type[Model], hash_key: str) -> Model | None:
     Returns:
         The most recent record, or None if no records exist.
     """
-    return next(model_cls.query(hash_key, scan_index_forward=False, limit=1), None)
+    return next(model_cls.query(hash_key, consistent_read=True, scan_index_forward=False, limit=1), None)
 
 
 def get_latest_release(*, dataset: str) -> DatasetReleaseRecord | None:
@@ -117,12 +125,53 @@ def get_release(*, dataset: str, release_date: str) -> DatasetReleaseRecord | No
         The matching DatasetReleaseRecord, or None if no such record exists.
     """
     try:
-        return DatasetReleaseRecord.get(dataset, release_date)
+        return DatasetReleaseRecord.get(dataset, release_date, consistent_read=True)
     except DoesNotExist:
         return None
 
 
-def persist_discovered_release(*, dataset: str, release: DatasetRelease, run_id: str) -> DatasetReleaseRecord:
+def list_releases(*, dataset: str) -> list[DatasetReleaseRecord]:
+    """Return all release records for a dataset using a strongly consistent read.
+
+    Args:
+        dataset: The dataset identifier.
+
+    Returns:
+        List of DatasetReleaseRecord, oldest release first.
+    """
+    return list(DatasetReleaseRecord.query(dataset, consistent_read=True))
+
+
+def mark_published(*, dataset: str, release_date: str, export_path: str, release_type: str) -> None:
+    """Record that a release has been published to the export bucket.
+
+    Uses an UpdateItem with set actions rather than get+save. Discovery writes also update
+    only their owned fields, so concurrent operations cannot drop publication state. The
+    condition requires the record to exist — publishing an unknown release raises.
+
+    Args:
+        dataset: The dataset identifier (hash key).
+        release_date: ISO date string "YYYY-MM-DD" (range key).
+        export_path: Key prefix of the published copy on the export bucket.
+        release_type: Kind of published release.
+    """
+    now = datetime.now(UTC).isoformat()
+    record = DatasetReleaseRecord(dataset, release_date)
+    record.update(
+        actions=[
+            DatasetReleaseRecord.release_type.set(release_type),
+            DatasetReleaseRecord.published_at.set(now),
+            DatasetReleaseRecord.export_path.set(export_path),
+            DatasetReleaseRecord.updated_at.set(now),
+        ],
+        condition=DatasetReleaseRecord.created_at.exists(),
+    )
+    log.info(f"Marked published: dataset={dataset} release_date={release_date} export_path={export_path}")
+
+
+def persist_discovered_release(
+    *, dataset: str, release: DatasetRelease, run_id: str, source_prefix: str | None = None
+) -> DatasetReleaseRecord:
     """Upsert a discovered release, keyed by (dataset, release_date).
 
     A re-run for an existing release_date refreshes the record in place — notably the
@@ -136,6 +185,7 @@ def persist_discovered_release(*, dataset: str, release: DatasetRelease, run_id:
         release: The DatasetRelease returned by a detector function.
         run_id: Identifier of the run that ingested this release; stored on the
             record so callers can reconstruct the S3 prefix the bytes live under.
+        source_prefix: Key prefix on the data bucket of the run output that produced this release.
 
     Returns:
         The persisted (created or updated) DatasetReleaseRecord.
@@ -143,19 +193,21 @@ def persist_discovered_release(*, dataset: str, release: DatasetRelease, run_id:
     release_date_str = release.release_date.isoformat()
     now = datetime.now(UTC).isoformat()
 
-    try:
-        record = DatasetReleaseRecord.get(dataset, release_date_str)
-        action = "Updated existing"
-    except DoesNotExist:
-        record = DatasetReleaseRecord(dataset=dataset, release_date=release_date_str, created_at=now)
-        action = "Persisted new"
+    record = DatasetReleaseRecord(dataset, release_date_str)
+    actions = [
+        DatasetReleaseRecord.created_at.set(DatasetReleaseRecord.created_at | now),
+        DatasetReleaseRecord.run_id.set(run_id),
+        DatasetReleaseRecord.metadata.set(release.metadata),
+        DatasetReleaseRecord.updated_at.set(now),
+    ]
+    for attribute, value in (
+        (DatasetReleaseRecord.file_name, release.file_name),
+        (DatasetReleaseRecord.download_url, release.download_url),
+        (DatasetReleaseRecord.file_hash, release.file_hash),
+        (DatasetReleaseRecord.source_prefix, source_prefix),
+    ):
+        actions.append(attribute.set(value) if value is not None else attribute.remove())
 
-    record.file_name = release.file_name
-    record.download_url = release.download_url
-    record.file_hash = release.file_hash
-    record.run_id = run_id
-    record.metadata = release.metadata
-    record.updated_at = now
-    record.save()
-    log.info(f"{action} release: dataset={dataset} release_date={release_date_str} run_id={run_id}")
+    record.update(actions=actions)
+    log.info(f"Persisted release: dataset={dataset} release_date={release_date_str} run_id={run_id}")
     return record

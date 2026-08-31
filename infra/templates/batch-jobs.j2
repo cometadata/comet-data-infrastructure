@@ -24,6 +24,10 @@ Parameters:
   DataCiteCredentialsSecretArn:
     Type: String
 
+  # Secrets Manager secret with Hugging Face bucket credentials (created out-of-band).
+  HfCredentialsSecretArn:
+    Type: String
+
   DatasetReleasesTableArn:
     Type: String
 
@@ -101,6 +105,31 @@ Resources:
                   - 'secretsmanager:GetSecretValue'
                 Resource: !Ref DataCiteCredentialsSecretArn
 
+  # Lets ECS inject the Hugging Face secret.
+  HfJobExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
+      Path: !Sub '/comet/${Env}/batch/'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ecs-tasks.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+        - PolicyName: 'HfSecretAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: !Ref HfCredentialsSecretArn
+
   # download-datacite: command overriden by BatchOperator.
   DownloadDataCiteJob:
     Type: 'AWS::Batch::JobDefinition'
@@ -115,6 +144,10 @@ Resources:
         Memory: 2048
         JobRoleArn: !GetAtt BatchJobRole.Arn
         ExecutionRoleArn: !GetAtt DataCiteJobExecutionRole.Arn
+        Environment:
+          # Read by the comet package.
+          - Name: COMET_ENV
+            Value: !Ref Env
         LogConfiguration:
           LogDriver: awslogs
           Options:
@@ -139,6 +172,48 @@ Resources:
           - -c
           - 'echo "download-datacite"'
 
+  # publish: command and sizing overriden by BatchOperator.
+  PublishJob:
+    Type: 'AWS::Batch::JobDefinition'
+    Properties:
+      Type: 'Container'
+      JobDefinitionName: !Sub 'comet-${Env}-publish-job'
+      PlatformCapabilities:
+        - 'EC2'
+      ContainerProperties:
+        Image: !Ref BatchImage
+        Vcpus: 1
+        Memory: 2048
+        JobRoleArn: !GetAtt BatchJobRole.Arn
+        ExecutionRoleArn: !GetAtt HfJobExecutionRole.Arn
+        Environment:
+          # Read by the comet package.
+          - Name: COMET_ENV
+            Value: !Ref Env
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref BatchLogGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: publish
+        Volumes:
+          - Host:
+              SourcePath: '/data'
+            Name: 'data-volume'
+        MountPoints:
+          - SourceVolume: 'data-volume'
+            ContainerPath: '/data'
+            ReadOnly: false
+        Secrets:
+          - Name: HF_S3_ACCESS_KEY_ID
+            ValueFrom: !Sub '${HfCredentialsSecretArn}:access_key_id::'
+          - Name: HF_S3_SECRET_ACCESS_KEY
+            ValueFrom: !Sub '${HfCredentialsSecretArn}:secret_access_key::'
+        Command:
+          - /bin/bash
+          - -c
+          - 'echo "publish"'
+
   # enrich-job: command overriden by BatchOperator.
   EnrichJob:
     Type: 'AWS::Batch::JobDefinition'
@@ -152,6 +227,10 @@ Resources:
         Vcpus: 1
         Memory: 2048
         JobRoleArn: !GetAtt BatchJobRole.Arn
+        Environment:
+          # Read by the comet package.
+          - Name: COMET_ENV
+            Value: !Ref Env
         LogConfiguration:
           LogDriver: awslogs
           Options:
@@ -267,6 +346,9 @@ Resources:
                   # The entrypoint waits for Marple to be ready before running the command.
                   - Name: WAIT_FOR_ROR_READY
                     Value: '1'
+                  # Read by the comet package.
+                  - Name: COMET_ENV
+                    Value: !Ref Env
                 MountPoints:
                   - SourceVolume: 'data-volume'
                     ContainerPath: '/data'
@@ -289,6 +371,8 @@ Outputs:
     Value: !GetAtt BatchJobRole.Arn
   DownloadDataCiteJobDefinitionArn:
     Value: !Ref DownloadDataCiteJob
+  PublishJobDefinitionArn:
+    Value: !Ref PublishJob
   EnrichJobDefinitionArn:
     Value: !Ref EnrichJob
   EnrichWithRorJobDefinitionArn:

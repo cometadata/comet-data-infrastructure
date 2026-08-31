@@ -18,17 +18,17 @@ logger = logging.getLogger(__name__)
 
 
 def get_env() -> str:
-    """Return the deployment environment from AWS_ENV (e.g. "dev").
+    """Return the deployment environment from COMET_ENV (e.g. "dev").
 
     Returns:
-        The value of the AWS_ENV environment variable.
+        The value of the COMET_ENV environment variable.
 
     Raises:
-        RuntimeError: If AWS_ENV is unset or empty.
+        RuntimeError: If COMET_ENV is unset or empty.
     """
-    env = os.environ.get("AWS_ENV")
+    env = os.environ.get("COMET_ENV")
     if not env:
-        raise RuntimeError("AWS_ENV environment variable is not set")
+        raise RuntimeError("COMET_ENV environment variable is not set")
     return env
 
 

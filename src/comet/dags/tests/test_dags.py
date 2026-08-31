@@ -9,15 +9,24 @@ import inspect
 from pathlib import Path
 import pkgutil
 import shutil
+from types import SimpleNamespace
 from typing import NamedTuple
 
 from airflow import DAG
+from airflow.sdk import AssetAny
+from airflow.sdk.exceptions import AirflowException, AirflowSkipException
 import pytest
+from pydantic import ValidationError
 import yaml
 
 import comet
 from comet.airflow import BaseDagParams
-from comet.airflow.assets import DATACITE_RELEASE_ASSET
+from comet.airflow.assets import (
+    DATACITE_AFFILIATIONS_ASSET,
+    DATACITE_FUNDERS_ASSET,
+    DATACITE_RELEASE_ASSET,
+    DATACITE_RESOURCE_TYPE_GENERAL_ASSET,
+)
 from comet.airflow.config import DagsConfig
 from comet.airflow.loader import load_dags, resolve_factory
 import comet.dags
@@ -30,12 +39,27 @@ from comet.dags.datacite_enrich_params import (
 )
 from comet.dags.datacite_enrich_resource_type_general import create_datacite_enrich_resource_type_general_dag
 from comet.dags.datacite_ingest import DataCiteIngestParams, create_datacite_ingest_dag
+import comet.dags.publish_enrichments as publish_enrichments
+from comet.dags.publish_enrichments import PublishEnrichmentsParams, create_publish_enrichments_dag
 from comet.dags.ror_ingest import RorIngestParams, create_ror_ingest_dag
+import comet.dynamodb_store as dataset_releases
+from comet.model.dataset_version_model import DatasetRelease
 
 REPO_ROOT = Path(comet.__file__).parents[2]
 EXAMPLE_CONFIG = REPO_ROOT / "dags" / "dags.yaml.example"
 
 START_DATE = datetime.datetime(2026, 1, 1)
+HF_ENDPOINT_URL = "https://s3.hf.co/test-namespace"
+
+
+def test_publish_params_require_hf_endpoint():
+    with pytest.raises(ValidationError, match="hf_endpoint_url"):
+        PublishEnrichmentsParams(
+            start_date=START_DATE,
+            source="datacite",
+            bucket_name="test-bucket",
+            hf_bucket_name="test-hf-bucket",
+        )
 
 
 class DagCase(NamedTuple):
@@ -103,6 +127,22 @@ DAG_CASES = [
         },
     ),
     DagCase(
+        "datacite_publish",
+        create_publish_enrichments_dag,
+        PublishEnrichmentsParams(
+            start_date=START_DATE,
+            source="datacite",
+            bucket_name="test-bucket",
+            hf_bucket_name="test-hf-bucket",
+            hf_endpoint_url=HF_ENDPOINT_URL,
+        ),
+        AssetAny(DATACITE_RESOURCE_TYPE_GENERAL_ASSET, DATACITE_FUNDERS_ASSET, DATACITE_AFFILIATIONS_ASSET),
+        {
+            "resolve_releases": {"publish"},
+            "publish": set(),
+        },
+    ),
+    DagCase(
         "datacite_enrich_affiliations",
         create_datacite_enrich_affiliations_dag,
         DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
@@ -162,3 +202,145 @@ class TestDags:
         config = DagsConfig.model_validate(yaml.safe_load(EXAMPLE_CONFIG.read_text()))
         declared = {entry.factory for entry in config.dags}
         assert declared == discovered
+
+    def test_example_config_uses_comet_hugging_face_destination(self):
+        config = DagsConfig.model_validate(yaml.safe_load(EXAMPLE_CONFIG.read_text()))
+        publish = next(entry for entry in config.dags if entry.dag_id == "datacite_publish")
+        assert publish.params["hf_bucket_name"] == "comet-enrichments"
+        assert publish.params["hf_endpoint_url"] == "https://s3.hf.co/cometadata"
+
+
+class TestPublishEnrichmentsDag:
+    @pytest.fixture
+    def dag(self):
+        params = PublishEnrichmentsParams(
+            start_date=START_DATE,
+            source="datacite",
+            bucket_name="test-bucket",
+            hf_bucket_name="test-hf-bucket",
+            hf_endpoint_url=HF_ENDPOINT_URL,
+        )
+        return create_publish_enrichments_dag("datacite_publish", params)
+
+    @staticmethod
+    def patch_resolve(mocker, latest: dict[str, str]):
+        """Resolve each dataset to its release date in ``latest`` with a stubbed record."""
+        mocker.patch.object(
+            publish_enrichments,
+            "resolve_release_record",
+            side_effect=lambda *, dataset, release_date: SimpleNamespace(
+                run_id=f"run-{dataset}",
+                release_date=latest[dataset],
+                source_prefix=f"enrich_{dataset}/run-{dataset}/",
+            ),
+        )
+
+    @staticmethod
+    def patch_context(mocker, datasets: list[str], release_date: str | None = None):
+        mocker.patch.object(
+            publish_enrichments,
+            "get_current_context",
+            return_value={"params": {"bucket_name": "test-bucket", "release_date": release_date, "datasets": datasets}},
+        )
+
+    def test_publishes_record_source_uris_when_latest_releases_align(self, dag, mocker):
+        latest = {
+            "datacite-funders": "2026-01-02",
+            "datacite-affiliations": "2026-01-02",
+            "datacite-resource-type-general": "2026-01-02",
+        }
+        self.patch_resolve(mocker, latest)
+        self.patch_context(mocker, datasets=list(latest))
+
+        resolved = dag.get_task("resolve_releases").python_callable()
+
+        assert resolved == {
+            "release_date": "2026-01-02",
+            "source_uris": {dataset: f"s3://test-bucket/enrich_{dataset}/run-{dataset}/" for dataset in latest},
+        }
+
+    @pytest.mark.parametrize(
+        ("asset_triggered", "expected"),
+        [(True, AirflowSkipException), (False, AirflowException)],
+        ids=["asset-run-skips", "manual-run-fails"],
+    )
+    def test_misaligned_latest_releases_skip_asset_runs_and_fail_manual_runs(
+        self, dag, mocker, asset_triggered, expected
+    ):
+        latest = {
+            "datacite-funders": "2026-01-03",
+            "datacite-affiliations": "2026-01-02",
+            "datacite-resource-type-general": "2026-01-02",
+        }
+        self.patch_resolve(mocker, latest)
+        self.patch_context(mocker, datasets=list(latest))
+        mocker.patch("comet.airflow.utils.is_asset_triggered", return_value=asset_triggered)
+
+        with pytest.raises(expected, match="not aligned") as excinfo:
+            dag.get_task("resolve_releases").python_callable()
+        assert type(excinfo.value) is expected
+
+    def test_manual_run_publishes_only_selected_datasets(self, dag, mocker):
+        self.patch_resolve(mocker, {"datacite-funders": "2026-01-02"})
+        self.patch_context(mocker, datasets=["datacite-funders"], release_date="2026-01-02")
+
+        resolved = dag.get_task("resolve_releases").python_callable()
+
+        assert resolved["source_uris"] == {
+            "datacite-funders": "s3://test-bucket/enrich_datacite-funders/run-datacite-funders/",
+        }
+
+    def test_fails_even_when_asset_triggered_if_record_has_no_source_prefix(self, dag, mocker):
+        mocker.patch.object(
+            publish_enrichments,
+            "resolve_release_record",
+            side_effect=lambda *, dataset, release_date: SimpleNamespace(
+                run_id=f"run-{dataset}", release_date="2026-01-02", source_prefix=None
+            ),
+        )
+        self.patch_context(mocker, datasets=["datacite-funders"])
+        mocker.patch("comet.airflow.utils.is_asset_triggered", return_value=True)
+
+        with pytest.raises(AirflowException, match="no source_prefix") as excinfo:
+            dag.get_task("resolve_releases").python_callable()
+        assert type(excinfo.value) is AirflowException
+
+    def test_batch_command_invokes_generic_publish_cli(self, dag):
+        command = dag.get_task("publish").container_overrides["command"]
+        assert command[:4] == ["comet", "publish", "--source", "datacite"]
+
+
+class TestEnrichPersistRelease:
+    ENRICH_CASES = [
+        (
+            create_datacite_enrich_funders_dag,
+            DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "datacite-funders",
+        ),
+        (
+            create_datacite_enrich_affiliations_dag,
+            DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "datacite-affiliations",
+        ),
+        (
+            create_datacite_enrich_resource_type_general_dag,
+            DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
+            "datacite-resource-type-general",
+        ),
+    ]
+
+    @pytest.mark.parametrize(("factory", "params", "dataset"), ENRICH_CASES, ids=[case[-1] for case in ENRICH_CASES])
+    def test_persist_release_stores_the_enrich_output_prefix(self, factory, params, dataset, mocker):
+        dag = factory("enrich_test", params)
+        mock_persist = mocker.patch.object(dataset_releases, "persist_discovered_release")
+        mocker.patch.object(inspect.getmodule(factory), "get_current_run_id", return_value="run-1")
+        release = DatasetRelease(release_date=datetime.date(2026, 1, 2))
+
+        dag.get_task("persist_release").python_callable(release.to_dict())
+
+        mock_persist.assert_called_once_with(
+            dataset=dataset,
+            release=release,
+            run_id="run-1",
+            source_prefix="enrich_test/run-1/",
+        )

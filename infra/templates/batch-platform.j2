@@ -4,12 +4,14 @@ Description: 'AWS Batch compute environments and job queues for COMET'
 # One job queue per compute environment. Each CE is pinned to one instance type so Batch
 # can't pack two jobs onto an instance.
 # - download:                     DataCite download (disk-heavy)  m6id.xlarge   (4 vCPU,  16 GiB,  237 GB NVMe)
+# - publish:                      publish to Hugging Face         c5ad.2xlarge  (8 vCPU,  16 GiB,  1x300 GB NVMe)
 # - enrich-resource-type-general: single-container enrich         c5ad.2xlarge  (8 vCPU,  16 GiB,  1x300 GB NVMe)
 # - enrich-funders:               enrich-with-ror (3 containers)  c5ad.4xlarge  (16 vCPU, 32 GiB,  2x300 GB NVMe RAID0)
 # - enrich-affiliations:          enrich-with-ror (3 containers)  c5ad.8xlarge  (32 vCPU, 64 GiB,  2x600 GB NVMe RAID0)
 # NVMe disks are mounted at /data by the launch template (2-disk instances use RAID0).
 {% set queues = [
   {"name": "download",                     "prefix": "BatchDownload",                  "instance_types": ["m6id.xlarge"],  "max_vcpus": 16},
+  {"name": "publish",                      "prefix": "BatchPublish",                   "instance_types": ["c5ad.2xlarge"], "max_vcpus": 8},
   {"name": "enrich-resource-type-general", "prefix": "BatchEnrichResourceTypeGeneral", "instance_types": ["c5ad.2xlarge"], "max_vcpus": 16},
   {"name": "enrich-funders",               "prefix": "BatchEnrichFunders",             "instance_types": ["c5ad.4xlarge"], "max_vcpus": 32},
   {"name": "enrich-affiliations",          "prefix": "BatchEnrichAffiliations",        "instance_types": ["c5ad.8xlarge"], "max_vcpus": 64},
