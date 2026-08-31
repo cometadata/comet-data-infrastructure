@@ -15,7 +15,6 @@ class TestEnrichTriggerParams:
         trigger = enrich_trigger_params(params)
 
         # Each param defaults to the validated YAML value.
-        assert set(trigger) == {"bucket_name", "datacite_dag_id", "release_date"}
-        assert trigger["bucket_name"].value == "comet-dev-s3-data"
+        assert set(trigger) == {"datacite_dag_id", "release_date"}
         assert trigger["datacite_dag_id"].value == "datacite_ingest"
         assert trigger["release_date"].value is None

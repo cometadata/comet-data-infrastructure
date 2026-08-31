@@ -143,7 +143,8 @@ def resolve_release_record(
         The resolved ``DatasetReleaseRecord``.
 
     Raises:
-        AirflowException: If no matching release record exists.
+        AirflowException: If no matching release record exists, or its run data was
+            pruned from the data bucket.
     """
     if triggering_key is not None:
         dataset, release_date = triggering_key
@@ -155,6 +156,10 @@ def resolve_release_record(
         record = dataset_releases.get_latest_release(dataset=dataset)
     if record is None:
         raise AirflowException(f"No release found for {dataset}/{release_date}")
+    if record.pruned_at:
+        raise AirflowException(
+            f"Release {dataset}/{record.release_date} was pruned from the data bucket; choose a newer release"
+        )
     return record
 
 

@@ -13,7 +13,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from comet.aws import clean_s3_prefix, download_files_from_s3, local_dir_for_uri, s3_uri, upload_files_to_s3
+from comet.aws import local_dir_for_uri, s3_uri, s5cmd_clean_prefix, s5cmd_download_files, s5cmd_upload_files
 from comet.constants import Enrichment, enrichments_for_source
 from comet.dynamodb_store import DatasetReleaseRecord, get_release, list_releases, mark_published
 
@@ -46,7 +46,7 @@ def full_release_prefix(enrichment: Enrichment, release_date: str) -> str:
     Returns:
         The key prefix, e.g. "datacite/funders/2026-01-02/full/".
     """
-    return f"{enrichment.source}/{enrichment.method}/{release_date}/{FULL_RELEASE_TYPE}/"
+    return f"{enrichment.source.identifier}/{enrichment.method}/{release_date}/{FULL_RELEASE_TYPE}/"
 
 
 def hf_credentials() -> tuple[str, str]:
@@ -165,9 +165,9 @@ def copy_release_to_hf(
     shutil.rmtree(stage_dir, ignore_errors=True)
     stage_dir.mkdir(parents=True, exist_ok=True)
     try:
-        download_files_from_s3(f"{source_uri}*", stage_dir)
-        clean_s3_prefix(target_uri, s3_client=s3_client, endpoint_url=endpoint_url, env=env)
-        upload_files_to_s3(stage_dir, target_uri, endpoint_url=endpoint_url, env=env)
+        s5cmd_download_files(f"{source_uri}*", stage_dir)
+        s5cmd_clean_prefix(target_uri, s3_client=s3_client, endpoint_url=endpoint_url, env=env)
+        s5cmd_upload_files(stage_dir, target_uri, endpoint_url=endpoint_url, env=env)
     finally:
         shutil.rmtree(stage_dir, ignore_errors=True)
 

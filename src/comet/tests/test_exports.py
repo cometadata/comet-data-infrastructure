@@ -10,6 +10,7 @@ from comet.constants import (
     DATACITE_AFFILIATIONS_ENRICHMENT,
     DATACITE_FUNDERS_ENRICHMENT,
     DATACITE_RESOURCE_TYPE_GENERAL_ENRICHMENT,
+    Source,
     Enrichment,
 )
 from comet.dynamodb_store import get_release, mark_published, persist_discovered_release
@@ -35,7 +36,12 @@ def hf_credentials(monkeypatch):
 
 def persist_release(enrichment: Enrichment, date_str: str, published: bool = False):
     release = DatasetRelease(release_date=datetime.date.fromisoformat(date_str))
-    persist_discovered_release(dataset=enrichment.identifier, release=release, run_id=f"run-{date_str}")
+    persist_discovered_release(
+        dataset=enrichment.identifier,
+        release=release,
+        run_id=f"run-{date_str}",
+        source_prefix=f"enrich/run-{date_str}/",
+    )
     if published:
         mark_published(
             dataset=enrichment.identifier,
@@ -62,7 +68,10 @@ def mock_hf_client(mocker, index=None):
     ("enrichment", "expected"),
     [
         (DATACITE_FUNDERS_ENRICHMENT, "datacite/funders/2026-01-02/full/"),
-        (Enrichment("openalex-works", "affiliations"), "openalex-works/affiliations/2026-01-02/full/"),
+        (
+            Enrichment(Source("openalex-works", 1), "affiliations", 3),
+            "openalex-works/affiliations/2026-01-02/full/",
+        ),
     ],
 )
 def test_full_release_prefix_joins_source_method_and_date(enrichment, expected):
@@ -133,9 +142,9 @@ class TestCopyReleaseToHf:
         client = mocker.Mock()
         env = {"AWS_ACCESS_KEY_ID": "hf-key"}
         mocker.patch("comet.exports.local_dir_for_uri", return_value=stage)
-        mock_download = mocker.patch("comet.exports.download_files_from_s3")
-        mock_clean = mocker.patch("comet.exports.clean_s3_prefix")
-        mock_upload = mocker.patch("comet.exports.upload_files_to_s3")
+        mock_download = mocker.patch("comet.exports.s5cmd_download_files")
+        mock_clean = mocker.patch("comet.exports.s5cmd_clean_prefix")
+        mock_upload = mocker.patch("comet.exports.s5cmd_upload_files")
 
         copy_release_to_hf(
             source_uri="s3://data-bucket/datacite_enrich_funders/run-1/",

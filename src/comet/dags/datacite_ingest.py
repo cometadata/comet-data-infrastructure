@@ -14,8 +14,15 @@ from comet.airflow.utils import (
     get_airflow_connection,
     get_current_run_id,
 )
-from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name
-from comet.constants import DATACITE_DATASET_NAME
+from comet.aws import (
+    BATCH_JOB_TAGS,
+    batch_job_definition_name,
+    batch_job_name,
+    batch_job_queue_name,
+    run_prefix,
+    s3_uri,
+)
+from comet.constants import DATACITE_SOURCE
 from comet.datacite.datacite import get_new_datacite_release, release_is_smaller, snapshot_stats
 import comet.dynamodb_store as dataset_releases
 from comet.model.dataset_version_model import DatasetRelease
@@ -29,7 +36,7 @@ class DataCiteIngestParams(BaseDagParams):
     """Factory-specific parameters for the DataCite ingest DAG.
 
     Attributes:
-        bucket_name: Destination S3 bucket for the DataCite snapshot (per-run overridable).
+        bucket_name: Destination S3 bucket for the DataCite snapshot.
         datacite_bucket_name: Source DataCite S3 bucket (per-run overridable).
         datacite_bucket_region: Region of the source DataCite bucket (per-run overridable).
         datacite_conn_name: Airflow connection id for DataCite credentials.
@@ -56,15 +63,6 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
         dag_id=dag_id,
         schedule="@daily",
         params={
-            "bucket_name": Param(
-                params.bucket_name,
-                type="string",
-                title="S3 bucket",
-                description=(
-                    "The COMET S3 data bucket that holds ingested datasets and enrichment outputs. "
-                    "Here it's the destination for the DataCite snapshot."
-                ),
-            ),
             "datacite_bucket_name": Param(
                 params.datacite_bucket_name,
                 type="string",
@@ -90,7 +88,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
         @task
         def fetch_release() -> dict:
             run_params = get_current_context()["params"]
-            last_release_record = dataset_releases.get_latest_release(dataset=DATACITE_DATASET_NAME)
+            last_release_record = dataset_releases.get_latest_release(dataset=DATACITE_SOURCE.identifier)
             published_after = pendulum.parse(last_release_record.release_date) if last_release_record else None
             conn = get_airflow_connection(params.datacite_conn_name)
             release = get_new_datacite_release(
@@ -129,7 +127,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
                     "datacite",
                     "download",
                     "--target-uri",
-                    "s3://{{ params.bucket_name }}/" + dag_id + "/{{ run_id }}/",
+                    s3_uri(params.bucket_name, run_prefix(dag_id, "{{ run_id }}")),
                     "--datacite-bucket-name",
                     "{{ params.datacite_bucket_name }}",
                     "--datacite-bucket-region",
@@ -149,9 +147,10 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
             release = DatasetRelease.from_dict(release)
             run_id = get_current_run_id()
             dataset_releases.persist_discovered_release(
-                dataset=DATACITE_DATASET_NAME,
+                dataset=DATACITE_SOURCE.identifier,
                 release=release,
                 run_id=run_id,
+                source_prefix=run_prefix(dag_id, run_id),
             )
 
         @task(outlets=[DATACITE_RELEASE_ASSET])
@@ -159,7 +158,7 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
             release = DatasetRelease.from_dict(release)
             yield build_release_asset_metadata(
                 asset=DATACITE_RELEASE_ASSET,
-                dataset=DATACITE_DATASET_NAME,
+                dataset=DATACITE_SOURCE.identifier,
                 release_date=release.release_date,
             )
 

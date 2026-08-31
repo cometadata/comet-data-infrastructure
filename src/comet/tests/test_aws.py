@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+import boto3
+from moto import mock_aws
 import pytest
 
 from comet.aws import (
     batch_job_definition_name,
     batch_job_name,
     batch_job_queue_name,
+    delete_s3_prefix,
     download_source_task,
+    first_object_timestamp,
+    list_run_prefixes,
+    s5cmd_clean_prefix,
     local_dir_for_uri,
     local_file_for_uri,
     s5cmd_command,
     transform_task,
-    upload_files_to_s3,
+    s5cmd_upload_files,
 )
 
 
@@ -93,8 +101,8 @@ class TestLocalFileForUri:
 
 class TestDownloadSourceTask:
     def test_yields_context_and_uploads_then_cleans(self, mocker, scratch_root):
-        mock_clean = mocker.patch("comet.aws.clean_s3_prefix")
-        mock_upload = mocker.patch("comet.aws.upload_files_to_s3")
+        mock_clean = mocker.patch("comet.aws.s5cmd_clean_prefix")
+        mock_upload = mocker.patch("comet.aws.s5cmd_upload_files")
 
         target_uri = "s3://bucket/datacite_ingest/run-1/"
         expected_dir = scratch_root / "datacite_ingest" / "run-1"
@@ -112,9 +120,9 @@ class TestDownloadSourceTask:
 
     @pytest.mark.parametrize("failure", ["body", "upload"])
     def test_cleans_without_partial_upload_when_task_fails(self, mocker, scratch_root, failure):
-        mocker.patch("comet.aws.clean_s3_prefix")
+        mocker.patch("comet.aws.s5cmd_clean_prefix")
         mock_upload = mocker.patch(
-            "comet.aws.upload_files_to_s3",
+            "comet.aws.s5cmd_upload_files",
             side_effect=RuntimeError("upload failed") if failure == "upload" else None,
         )
         target_uri = "s3://bucket/datacite_ingest/run-1/"
@@ -133,9 +141,9 @@ class TestDownloadSourceTask:
 
 class TestTransformTask:
     def test_downloads_uploads_public_output_tree_then_cleans(self, mocker, scratch_root):
-        mock_clean = mocker.patch("comet.aws.clean_s3_prefix")
-        mock_download = mocker.patch("comet.aws.download_files_from_s3")
-        mock_upload = mocker.patch("comet.aws.upload_files_to_s3")
+        mock_clean = mocker.patch("comet.aws.s5cmd_clean_prefix")
+        mock_download = mocker.patch("comet.aws.s5cmd_download_files")
+        mock_upload = mocker.patch("comet.aws.s5cmd_upload_files")
 
         source_uri = "s3://bucket/datacite_ingest/src-run/"
         target_uri = "s3://bucket/datacite_enrich_resource_type_general/run-1/"
@@ -165,18 +173,18 @@ class TestTransformTask:
 
     @pytest.mark.parametrize("failure", ["download", "body", "upload"])
     def test_cleans_without_partial_upload_when_task_fails(self, mocker, scratch_root, failure):
-        mocker.patch("comet.aws.clean_s3_prefix")
+        mocker.patch("comet.aws.s5cmd_clean_prefix")
 
         def fail_after_partial_download(source_uri, target_dir):
             (target_dir / "partial.jsonl").write_text("{}")
             raise RuntimeError("download failed")
 
         mocker.patch(
-            "comet.aws.download_files_from_s3",
+            "comet.aws.s5cmd_download_files",
             side_effect=fail_after_partial_download if failure == "download" else None,
         )
         mock_upload = mocker.patch(
-            "comet.aws.upload_files_to_s3",
+            "comet.aws.s5cmd_upload_files",
             side_effect=RuntimeError("upload failed") if failure == "upload" else None,
         )
         source_uri = "s3://bucket/datacite_ingest/src-run/"
@@ -194,6 +202,123 @@ class TestTransformTask:
         assert not stage_dir.exists()
 
 
+class TestDeleteS3Prefix:
+    @pytest.fixture
+    def s3(self):
+        with mock_aws():
+            client = boto3.client("s3", region_name="us-east-1")
+            client.create_bucket(Bucket="test-bucket")
+            yield client
+
+    def test_deletes_only_objects_under_the_prefix(self, s3):
+        for key in ["datacite_ingest/run-1/a", "datacite_ingest/run-1/b", "datacite_ingest/run-2/keep"]:
+            s3.put_object(Bucket="test-bucket", Key=key, Body=b"")
+
+        deleted = delete_s3_prefix("test-bucket", "datacite_ingest/run-1/", s3_client=s3)
+
+        assert deleted == 2
+        remaining = s3.list_objects_v2(Bucket="test-bucket", Prefix="datacite_ingest/")
+        assert [obj["Key"] for obj in remaining["Contents"]] == ["datacite_ingest/run-2/keep"]
+
+    def test_requires_directory_like_prefix_before_deleting(self, s3):
+        keys = ["datacite_ingest/run-1/data.json", "datacite_ingest/run-11/data.json"]
+        for key in keys:
+            s3.put_object(Bucket="test-bucket", Key=key, Body=b"")
+
+        with pytest.raises(ValueError, match="trailing slash"):
+            delete_s3_prefix("test-bucket", "datacite_ingest/run-1", s3_client=s3)
+
+        remaining = s3.list_objects_v2(Bucket="test-bucket", Prefix="datacite_ingest/")
+        assert [obj["Key"] for obj in remaining["Contents"]] == keys
+
+        deleted = delete_s3_prefix("test-bucket", "datacite_ingest/run-1/", s3_client=s3)
+
+        assert deleted == 1
+        remaining = s3.list_objects_v2(Bucket="test-bucket", Prefix="datacite_ingest/")
+        assert [obj["Key"] for obj in remaining["Contents"]] == ["datacite_ingest/run-11/data.json"]
+
+    def test_issues_one_delete_call_per_list_page(self, mocker):
+        pages = [
+            {"Contents": [{"Key": f"run-1/part_{i}"} for i in range(3)]},
+            {"Contents": [{"Key": f"run-1/part_{i}"} for i in range(3, 5)]},
+        ]
+        client = mocker.Mock()
+        client.get_paginator.return_value.paginate.return_value = pages
+        client.delete_objects.return_value = {}
+
+        deleted = delete_s3_prefix("test-bucket", "run-1/", s3_client=client)
+
+        assert deleted == 5
+        batches = [len(call.kwargs["Delete"]["Objects"]) for call in client.delete_objects.call_args_list]
+        assert batches == [3, 2]
+
+    def test_dry_run_counts_without_deleting(self, s3, mocker):
+        s3.put_object(Bucket="test-bucket", Key="ror_ingest/run-1/ror.zip", Body=b"")
+        spy = mocker.spy(s3, "delete_objects")
+
+        deleted = delete_s3_prefix("test-bucket", "ror_ingest/run-1/", s3_client=s3, dry_run=True)
+
+        assert deleted == 1
+        spy.assert_not_called()
+        assert s3.list_objects_v2(Bucket="test-bucket", Prefix="ror_ingest/")["KeyCount"] == 1
+
+    def test_returns_zero_for_prefix_without_objects(self, s3, mocker):
+        spy = mocker.spy(s3, "delete_objects")
+
+        assert delete_s3_prefix("test-bucket", "datacite_ingest/gone/", s3_client=s3) == 0
+        spy.assert_not_called()
+
+    @pytest.mark.parametrize("prefix", ["", "/", "  ", "//"])
+    def test_rejects_empty_prefix(self, prefix):
+        with pytest.raises(ValueError, match="empty prefix"):
+            delete_s3_prefix("test-bucket", prefix)
+
+
+class TestListRunPrefixes:
+    def test_discovers_run_prefixes_only_below_configured_dags(self, mocker):
+        paginator = mocker.Mock()
+        paginator.paginate.return_value = [
+            {"CommonPrefixes": [{"Prefix": "datacite_ingest/scheduled__2026-01-01T00:00:00+00:00/"}]},
+            {"CommonPrefixes": [{"Prefix": "datacite_ingest/manual__2026-02-01T00:00:00+00:00_xyz/"}]},
+        ]
+        client = mocker.Mock()
+        client.get_paginator.return_value = paginator
+
+        discovered = list_run_prefixes("data-bucket", ["datacite_ingest"], s3_client=client)
+
+        assert discovered == {
+            "datacite_ingest/scheduled__2026-01-01T00:00:00+00:00/",
+            "datacite_ingest/manual__2026-02-01T00:00:00+00:00_xyz/",
+        }
+        paginator.paginate.assert_called_once_with(
+            Bucket="data-bucket",
+            Prefix="datacite_ingest/",
+            Delimiter="/",
+        )
+
+
+class TestFirstObjectTimestamp:
+    def test_uses_the_first_object_date_for_an_untracked_run(self, mocker):
+        last_modified = datetime(2026, 2, 1, tzinfo=UTC)
+        client = mocker.Mock()
+        client.list_objects_v2.return_value = {
+            "Contents": [{"Key": "datacite_ingest/run-1/part-0001", "LastModified": last_modified}]
+        }
+
+        timestamp = first_object_timestamp(
+            "data-bucket",
+            "datacite_ingest/run-1/",
+            s3_client=client,
+        )
+
+        assert timestamp == last_modified
+        client.list_objects_v2.assert_called_once_with(
+            Bucket="data-bucket",
+            Prefix="datacite_ingest/run-1/",
+            MaxKeys=1,
+        )
+
+
 class TestS5cmdCommand:
     @pytest.mark.parametrize(
         "endpoint_url,expected",
@@ -209,11 +334,22 @@ class TestS5cmdCommand:
         assert s5cmd_command("cp", "src", "dst", endpoint_url=endpoint_url) == expected
 
 
+class TestS5cmdCleanPrefix:
+    @pytest.mark.parametrize("uri", ["s3://test-bucket", "s3://test-bucket/", "s3://test-bucket/prefix"])
+    def test_refuses_unsafe_prefixes(self, uri, mocker):
+        run = mocker.patch("comet.aws.run_process")
+
+        with pytest.raises(ValueError, match="Refusing to delete"):
+            s5cmd_clean_prefix(uri)
+
+        run.assert_not_called()
+
+
 class TestUploadFilesToS3:
     def test_adds_each_exclusion_before_source_and_destination(self, mocker, tmp_path):
         mock_run_process = mocker.patch("comet.aws.run_process")
 
-        upload_files_to_s3(
+        s5cmd_upload_files(
             tmp_path,
             "s3://bucket/output/",
             "*",

@@ -12,6 +12,10 @@ Two ingest DAGs run daily. Each checks the upstream source for a release newer t
 
 Publishing DAGs run after their enrichment assets are updated. When the selected enrichments have the same release date, the DAG copies them to a Hugging Face S3-compatible bucket, records them as published, and uploads the release index. See [enrichment-data.md](enrichment-data.md) for how to access the published files.
 
+The `prune_releases` DAG runs monthly. It retains the configured number of source and published enrichment releases. Unpublished enrichment outputs remain until a newer publication supersedes them.
+
+Untracked prefixes become eligible after the configured grace period. Release records are marked as pruned before their S3 data is removed so retries cannot resolve missing run data.
+
 ![Dataflow](img/dataflow.png)
 
 Heavier processing runs as AWS Batch jobs. The general pattern is to store input and output data in S3: each job downloads the data it needs to local NVMe disk, processes it, uploads the results back to S3, and exits. [s5cmd](https://github.com/peak/s5cmd) is used for the transfers because it is significantly faster than the AWS CLI for large transfers and workloads involving many files. Each job writes to an S3 path that includes the Airflow run ID, and deletes anything already at that path before it starts, so jobs can be re-run safely and don't rely on local state or a specific instance.
