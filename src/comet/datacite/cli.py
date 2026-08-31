@@ -46,6 +46,7 @@ def resource_type_general(
     *,
     input_uri: str,
     output_uri: str,
+    source_release_date: list[str],
     rules_uri: str,
     provenance_uri: str,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
@@ -55,6 +56,7 @@ def resource_type_general(
     Args:
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
+        source_release_date: Source release date as a "key=value" entry, e.g. "datacite=2026-01-02"; repeat per source.
         rules_uri: S3 URI of the reclassification rules YAML.
         provenance_uri: S3 URI of the enrichment provenance YAML.
         output_writer_lanes: Parallel writer lanes for the enrichment output.
@@ -66,6 +68,7 @@ def resource_type_general(
     enrich.enrich_resource_type_general(
         input_uri=input_uri,
         output_uri=output_uri,
+        source_release_date=source_release_date,
         rules_uri=rules_uri,
         provenance_uri=provenance_uri,
         output_writer_lanes=output_writer_lanes,
@@ -77,6 +80,7 @@ def funders(
     *,
     input_uri: str,
     output_uri: str,
+    source_release_date: list[str],
     ror_data_uri: str,
     provenance_uri: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
@@ -87,6 +91,7 @@ def funders(
     Args:
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
+        source_release_date: Source release date as a "key=value" entry, e.g. "datacite=2026-01-02"; repeat per source.
         ror_data_uri: S3 URI of the ROR release zip used to reconcile matches to ROR records.
         provenance_uri: S3 URI of the funders provenance YAML.
         ror_service_url: Base URL of the ROR match service.
@@ -99,6 +104,7 @@ def funders(
     enrich.enrich_funders(
         input_uri=input_uri,
         output_uri=output_uri,
+        source_release_date=source_release_date,
         ror_data_uri=ror_data_uri,
         provenance_uri=provenance_uri,
         ror_service_url=ror_service_url,
@@ -111,6 +117,7 @@ def affiliations(
     *,
     input_uri: str,
     output_uri: str,
+    source_release_date: list[str],
     provenance_uri: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
@@ -120,6 +127,7 @@ def affiliations(
     Args:
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
+        source_release_date: Source release date as a "key=value" entry, e.g. "datacite=2026-01-02"; repeat per source.
         provenance_uri: S3 URI of the affiliations provenance YAML.
         ror_service_url: Base URL of the ROR match service.
         output_writer_lanes: Parallel writer lanes for the enrichment output.
@@ -131,6 +139,7 @@ def affiliations(
     enrich.enrich_affiliations(
         input_uri=input_uri,
         output_uri=output_uri,
+        source_release_date=source_release_date,
         provenance_uri=provenance_uri,
         ror_service_url=ror_service_url,
         output_writer_lanes=output_writer_lanes,
