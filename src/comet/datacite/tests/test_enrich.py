@@ -47,10 +47,8 @@ class TestEnrichResourceTypeGeneral:
         ctx = transform_context(tmp_path, "datacite_enrich_resource_type_general")
         captured = {}
         rules_local = tmp_path / "cfg" / "rules.yaml"
-        provenance_local = tmp_path / "cfg" / "provenance.yaml"
-        mock_download = mocker.patch(
-            "comet.datacite.enrich.download_config", side_effect=[rules_local, provenance_local]
-        )
+        rules_uri = "s3://bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml"
+        mock_download = mocker.patch("comet.datacite.enrich.download_config", return_value=rules_local)
         mock_run_process = mocker.patch("comet.datacite.enrich.run_process")
 
         with patch("comet.datacite.enrich.transform_task", fake_transform_task(ctx, captured)):
@@ -58,8 +56,8 @@ class TestEnrichResourceTypeGeneral:
                 input_uri="s3://bucket/datacite_ingest/src-run/",
                 output_uri=ctx.target_uri,
                 source_release_date=["datacite=2026-01-02"],
-                rules_uri="s3://bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-                provenance_uri="s3://bucket/enrichment-configs/resource-type-general-provenance.yaml",
+                rules_uri=rules_uri,
+                source_id="10.1234/example",
             )
 
         assert captured == {
@@ -68,10 +66,7 @@ class TestEnrichResourceTypeGeneral:
             "upload_glob": UPLOAD_GLOB,
             "upload_exclude_patterns": UPLOAD_EXCLUDE_PATTERNS,
         }
-        assert [call.args[0] for call in mock_download.call_args_list] == [
-            "s3://bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-            "s3://bucket/enrichment-configs/resource-type-general-provenance.yaml",
-        ]
+        mock_download.assert_called_once_with(rules_uri)
         mock_run_process.assert_called_once_with(
             [
                 "comet-enrich",
@@ -82,8 +77,8 @@ class TestEnrichResourceTypeGeneral:
                 str(ctx.transform_dir),
                 "--rules",
                 str(rules_local),
-                "--provenance",
-                str(provenance_local),
+                "--source-id",
+                "10.1234/example",
                 "--source-release-date",
                 "datacite=2026-01-02",
                 "--output-writer-lanes",
@@ -106,15 +101,12 @@ class TestRorEnrichers:
     ):
         ctx = transform_context(tmp_path, f"datacite_enrich_{subcommand}")
         captured = {}
-        provenance_local = tmp_path / "cfg" / "provenance.yaml"
-        provenance_uri = f"s3://bucket/enrichment-configs/{subcommand}-provenance.yaml"
-        mock_download = mocker.patch("comet.datacite.enrich.download_config", return_value=provenance_local)
         mock_run_process = mocker.patch("comet.datacite.enrich.run_process")
         kwargs = dict(
             input_uri="s3://bucket/datacite_ingest/src-run/",
             output_uri=ctx.target_uri,
             source_release_date=["datacite=2026-01-02", "ror=2026-01-15"],
-            provenance_uri=provenance_uri,
+            source_id="10.1234/example",
             ror_service_url="http://ror-service:8000",
             output_writer_lanes=writer_lanes,
         )
@@ -132,7 +124,6 @@ class TestRorEnrichers:
 
         assert captured["upload_glob"] == UPLOAD_GLOB
         assert captured["upload_exclude_patterns"] == UPLOAD_EXCLUDE_PATTERNS
-        mock_download.assert_called_once_with(provenance_uri)
         mock_run_process.assert_called_once_with(
             [
                 "comet-enrich",
@@ -141,8 +132,8 @@ class TestRorEnrichers:
                 str(ctx.download_dir),
                 "--output",
                 str(ctx.transform_dir),
-                "--provenance",
-                str(provenance_local),
+                "--source-id",
+                "10.1234/example",
                 "--source-release-date",
                 "datacite=2026-01-02",
                 "--source-release-date",

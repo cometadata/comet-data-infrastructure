@@ -35,6 +35,7 @@ dags:
       tags: [datacite, enrich]
       deadline_minutes: 90
       bucket_name: <your-s3-bucket>
+      source_id: 10.82461/bpzr-jd55
       datacite_dag_id: datacite_ingest
 
   - dag_id: datacite_enrich_funders
@@ -46,6 +47,7 @@ dags:
       tags: [datacite, enrich]
       deadline_minutes: 60
       bucket_name: <your-s3-bucket>
+      source_id: 10.82461/gc3p-n671
       datacite_dag_id: datacite_ingest
       ror_dag_id: ror_ingest
 
@@ -58,6 +60,7 @@ dags:
       tags: [datacite, enrich]
       deadline_minutes: 90
       bucket_name: <your-s3-bucket>
+      source_id: 10.82461/q6gh-3c48
       datacite_dag_id: datacite_ingest
       ror_dag_id: ror_ingest
 

@@ -58,8 +58,8 @@ class TestDataciteEnrichResourceTypeGeneralCommand:
                     "datacite=2026-01-02",
                     "--rules-uri",
                     "s3://my-bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-                    "--provenance-uri",
-                    "s3://my-bucket/enrichment-configs/resource-type-general-provenance.yaml",
+                    "--source-id",
+                    "10.1234/example",
                 ]
             )
         assert exc_info.value.code == 0
@@ -69,7 +69,7 @@ class TestDataciteEnrichResourceTypeGeneralCommand:
             output_uri="s3://my-bucket/datacite_enrich_resource_type_general/run-1/",
             source_release_date=["datacite=2026-01-02"],
             rules_uri="s3://my-bucket/enrichment-configs/resource-type-general-reclassification-rules.yaml",
-            provenance_uri="s3://my-bucket/enrichment-configs/resource-type-general-provenance.yaml",
+            source_id="10.1234/example",
             output_writer_lanes=1,
         )
 
@@ -94,8 +94,8 @@ class TestDataciteEnrichFundersCommand:
                     "ror=2026-01-15",
                     "--ror-data-uri",
                     "s3://my-bucket/ror_ingest/ror-run/ror.zip",
-                    "--provenance-uri",
-                    "s3://my-bucket/enrichment-configs/funders-provenance.yaml",
+                    "--source-id",
+                    "10.1234/example",
                 ]
             )
         assert exc_info.value.code == 0
@@ -105,7 +105,7 @@ class TestDataciteEnrichFundersCommand:
             output_uri="s3://my-bucket/datacite_enrich_funders/run-1/",
             source_release_date=["datacite=2026-01-02", "ror=2026-01-15"],
             ror_data_uri="s3://my-bucket/ror_ingest/ror-run/ror.zip",
-            provenance_uri="s3://my-bucket/enrichment-configs/funders-provenance.yaml",
+            source_id="10.1234/example",
             ror_service_url="http://localhost:8000",
             output_writer_lanes=1,
         )
@@ -129,8 +129,8 @@ class TestDataciteEnrichAffiliationsCommand:
                     "datacite=2026-01-02",
                     "--source-release-date",
                     "ror=2026-01-15",
-                    "--provenance-uri",
-                    "s3://my-bucket/enrichment-configs/affiliations-provenance.yaml",
+                    "--source-id",
+                    "10.1234/example",
                     "--output-writer-lanes",
                     "32",
                 ]
@@ -141,7 +141,7 @@ class TestDataciteEnrichAffiliationsCommand:
             input_uri="s3://my-bucket/datacite_ingest/src-run/",
             output_uri="s3://my-bucket/datacite_enrich_affiliations/run-1/",
             source_release_date=["datacite=2026-01-02", "ror=2026-01-15"],
-            provenance_uri="s3://my-bucket/enrichment-configs/affiliations-provenance.yaml",
+            source_id="10.1234/example",
             ror_service_url="http://localhost:8000",
             output_writer_lanes=32,
         )

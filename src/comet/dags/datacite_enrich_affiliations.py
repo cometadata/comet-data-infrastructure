@@ -69,12 +69,6 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                 title="ROR release date",
                 description="Which ROR release to use (YYYY-MM-DD). Empty = latest ROR release.",
             ),
-            "provenance_path": Param(
-                "enrichment-configs/affiliations-provenance.yaml",
-                type="string",
-                title="Provenance path",
-                description="S3 path (within the bucket) of the affiliations provenance YAML.",
-            ),
         },
         user_defined_macros={
             "get_env": get_env,
@@ -163,8 +157,8 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "datacite={{ ti.xcom_pull(task_ids='fetch_datacite_release')['release_date'] }}",
                                     "--source-release-date",
                                     "ror={{ ti.xcom_pull(task_ids='fetch_ror_release')['release_date'] }}",
-                                    "--provenance-uri",
-                                    s3_uri(params.bucket_name, "{{ params.provenance_path }}"),
+                                    "--source-id",
+                                    "{{ params.source_id }}",
                                     "--output-writer-lanes",
                                     WRITER_LANES,
                                 ],

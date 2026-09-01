@@ -48,7 +48,7 @@ def resource_type_general(
     output_uri: str,
     source_release_date: list[str],
     rules_uri: str,
-    provenance_uri: str,
+    source_id: str,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ) -> None:
     """Reclassify ``types.resourceTypeGeneral`` over the DataCite snapshot.
@@ -58,7 +58,7 @@ def resource_type_general(
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         source_release_date: Source release date as a "key=value" entry, e.g. "datacite=2026-01-02"; repeat per source.
         rules_uri: S3 URI of the reclassification rules YAML.
-        provenance_uri: S3 URI of the enrichment provenance YAML.
+        source_id: The enrichment project's DOI name, such as 10.1234/example. The value is written to the sourceId field of every output record.
         output_writer_lanes: Parallel writer lanes for the enrichment output.
     """
     from comet.cli import setup_logging
@@ -70,7 +70,7 @@ def resource_type_general(
         output_uri=output_uri,
         source_release_date=source_release_date,
         rules_uri=rules_uri,
-        provenance_uri=provenance_uri,
+        source_id=source_id,
         output_writer_lanes=output_writer_lanes,
     )
 
@@ -82,7 +82,7 @@ def funders(
     output_uri: str,
     source_release_date: list[str],
     ror_data_uri: str,
-    provenance_uri: str,
+    source_id: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ) -> None:
@@ -93,7 +93,7 @@ def funders(
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         source_release_date: Source release date as a "key=value" entry, e.g. "datacite=2026-01-02"; repeat per source.
         ror_data_uri: S3 URI of the ROR release zip used to reconcile matches to ROR records.
-        provenance_uri: S3 URI of the funders provenance YAML.
+        source_id: The enrichment project's DOI name, such as 10.1234/example. The value is written to the sourceId field of every output record.
         ror_service_url: Base URL of the ROR match service.
         output_writer_lanes: Parallel writer lanes for the enrichment output.
     """
@@ -106,7 +106,7 @@ def funders(
         output_uri=output_uri,
         source_release_date=source_release_date,
         ror_data_uri=ror_data_uri,
-        provenance_uri=provenance_uri,
+        source_id=source_id,
         ror_service_url=ror_service_url,
         output_writer_lanes=output_writer_lanes,
     )
@@ -118,7 +118,7 @@ def affiliations(
     input_uri: str,
     output_uri: str,
     source_release_date: list[str],
-    provenance_uri: str,
+    source_id: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ) -> None:
@@ -128,7 +128,7 @@ def affiliations(
         input_uri: S3 URI of the staged DataCite snapshot (trailing slash).
         output_uri: S3 URI to upload the enrichment output to (trailing slash).
         source_release_date: Source release date as a "key=value" entry, e.g. "datacite=2026-01-02"; repeat per source.
-        provenance_uri: S3 URI of the affiliations provenance YAML.
+        source_id: The enrichment project's DOI name, such as 10.1234/example. The value is written to the sourceId field of every output record.
         ror_service_url: Base URL of the ROR match service.
         output_writer_lanes: Parallel writer lanes for the enrichment output.
     """
@@ -140,7 +140,7 @@ def affiliations(
         input_uri=input_uri,
         output_uri=output_uri,
         source_release_date=source_release_date,
-        provenance_uri=provenance_uri,
+        source_id=source_id,
         ror_service_url=ror_service_url,
         output_writer_lanes=output_writer_lanes,
     )

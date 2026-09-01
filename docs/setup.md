@@ -210,14 +210,9 @@ The `slack_alert_test` entry in `dags/dags.yaml.example` is disabled by default.
 
 ### Enrichment configuration
 
-Once the data bucket exists, upload the rules and provenance files from the matching `comet-enrich` release or checkout through the S3 console. Use these object keys:
+Upload `configs/resource-type-general-reclassification-rules.yaml` from `comet-enrich` to the data bucket at `enrichment-configs/resource-type-general-reclassification-rules.yaml`. The object must exist before running the `datacite_enrich_resource_type_general` DAG.
 
-- `enrichment-configs/resource-type-general-reclassification-rules.yaml`
-- `enrichment-configs/resource-type-general-provenance.yaml`
-- `enrichment-configs/affiliations-provenance.yaml`
-- `enrichment-configs/funders-provenance.yaml`
-
-These objects must exist before running the DataCite enrichment DAGs. Infrastructure deployment does not upload or update them.
+Set `source_id` on each enrichment DAG's entry in `dags.yaml` to the enrichment project's DOI name, such as `10.1234/example`. Each DAG writes the value to the `sourceId` field of every output record. For an individual run, `source_id` can also be overridden in the Airflow UI when triggering the DAG.
 
 ### DataCite credentials
 

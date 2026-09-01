@@ -56,12 +56,6 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
                 title="Reclassification rules path",
                 description="S3 path (within the bucket) of the resourceTypeGeneral reclassification rules YAML.",
             ),
-            "provenance_path": Param(
-                "enrichment-configs/resource-type-general-provenance.yaml",
-                type="string",
-                title="Provenance path",
-                description="S3 path (within the bucket) of the resourceTypeGeneral provenance YAML.",
-            ),
         },
         user_defined_macros={
             "get_env": get_env,
@@ -114,8 +108,8 @@ def create_datacite_enrich_resource_type_general_dag(dag_id: str, params: DataCi
                     "datacite={{ ti.xcom_pull(task_ids='fetch_datacite_release')['release_date'] }}",
                     "--rules-uri",
                     s3_uri(params.bucket_name, "{{ params.rules_path }}"),
-                    "--provenance-uri",
-                    s3_uri(params.bucket_name, "{{ params.provenance_path }}"),
+                    "--source-id",
+                    "{{ params.source_id }}",
                     "--output-writer-lanes",
                     WRITER_LANES,
                 ],
