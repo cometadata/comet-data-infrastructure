@@ -32,7 +32,7 @@ export AWS_DEFAULT_REGION=us-east-1
 
 COMET uses a shared VPC, public subnet, and route table created outside this repository. You also need an S3 bucket for CloudFormation templates and a GitHub connection in **Developer Tools → Settings → Connections**. Create and authorize the connection, and confirm that its status is **Available**. Record the stack outputs, bucket name, connection ARN, and GitHub repository ID in `vars-dev.yaml` during the [first deployment](#first-deployment).
 
-Create the [DataCite credentials](#datacite-credentials), [Hugging Face publish credentials](#hugging-face-publish-credentials), and [Airflow Fernet key](#rotating-the-fernet-key) in Secrets Manager before deploying. Use the default `aws/secretsmanager` encryption key for all three. The COMET roles do not have permission to decrypt customer-managed KMS keys.
+Create the [DataCite credentials](#datacite-credentials), [Hugging Face publish credentials](#hugging-face-publish-credentials), [Airflow Fernet key](#rotating-the-fernet-key), and [Slack webhook](#configure-slack-alerts) in Secrets Manager before deploying. Use the default `aws/secretsmanager` encryption key for all four. The COMET roles do not have permission to decrypt customer-managed KMS keys.
 
 Enable resource tags for telemetry in the COMET AWS account before deploying the monitoring stacks. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
 
@@ -145,11 +145,23 @@ To deploy without a workstation checkout, open the `comet-dev-deploy` project in
 
 Run `make sync-vars` whenever `vars-dev.yaml` changes so the deploy project receives the new settings.
 
-The `push-*` targets (`push-batch`, `push-marple`, `push-airflow`, or `push-all`) build and push images locally. Image tags are immutable, so uncommitted work needs an override, for example `make push-all IMAGE_TAG=jamie-test-1`.
+### Deploying a local build
+
+To deploy the current checkout without going through the pipeline, build and push all three images with a local tag, promote that tag, and launch:
+
+```bash
+export ECR_REGISTRY=<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
+export IMAGE_TAG="local-$(git rev-parse --short=7 HEAD)"
+make push-all IMAGE_TAG="$IMAGE_TAG"
+make promote SOURCE_TAG="$IMAGE_TAG"
+make launch
+```
+
+The `local-` prefix keeps these builds apart from the pipeline's `sha-*` tags for the same commit. ECR tags are immutable, so pushing again after further uncommitted changes needs a new tag. The individual `push-batch`, `push-marple`, and `push-airflow` targets build and push one image.
 
 ### Airflow image
 
-Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the Amazon provider installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
+Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the Amazon and Slack providers installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
 
 ```bash
 make build-airflow         # build the image locally
@@ -167,6 +179,35 @@ Commit `versions.env`, `pyproject.toml`, and `uv.lock` together. The main pipeli
 
 `make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or extras, edit the target before running it.
 
+### Configure Slack alerts
+
+Create a Slack channel for the alerts:
+
+1. In Slack, select **+ → Channel**, enter a name such as `airflow`, and create the channel.
+2. Open [Slack API Apps](https://api.slack.com/apps), select **Create New App → From scratch**, and choose the workspace.
+3. Open **Incoming Webhooks** and enable **Activate Incoming Webhooks**.
+4. Select **Add New Webhook to Workspace**, choose the alert channel, and authorize it.
+5. Copy the generated `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` URL.
+
+Then store the webhook as a Secrets Manager secret. The Airflow workers read the `slack_default`
+connection from this secret. Every Slack message is sent from a worker, and deadline callbacks run
+with a restricted Execution API token that cannot read connections from the metadata database, so
+the connection must resolve from the environment instead.
+
+1. Open Secrets Manager in the AWS console and select **Store a new secret → Other type of secret**.
+2. On the **Plaintext** tab, enter the connection as JSON:
+
+   ```json
+   {"conn_type": "slackwebhook", "password": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"}
+   ```
+
+3. Name the secret, for example `comet-dev-airflow-slack-webhook`, and finish creating it.
+4. Copy the secret ARN to `slack_webhook_secret_arn` in `vars-dev.yaml`.
+
+#### Test Slack alerts
+
+The `slack_alert_test` entry in `dags/dags.yaml.example` is disabled by default. Enable it in the deployed `dags.yaml`, upload the file as described in [dags.md](dags.md), then unpause and trigger the DAG in Airflow. One task sends the success message immediately; the other sleeps past the two-minute deadline and then fails.
+
 ### Enrichment configuration
 
 Once the data bucket exists, upload the rules and provenance files from the matching `comet-enrich` release or checkout through the S3 console. Use these object keys:
@@ -180,7 +221,7 @@ These objects must exist before running the DataCite enrichment DAGs. Infrastruc
 
 ### DataCite credentials
 
-Configure the DataCite account ID and password in two places: Secrets Manager for the `download-datacite` Batch job and an Airflow connection for the `datacite_ingest` DAG.
+Configure the DataCite account ID and password in Secrets Manager for the `download-datacite` Batch job and in the `datacite` Airflow connection. Update both when rotating the credentials.
 
 Create the Batch secret:
 
@@ -198,11 +239,7 @@ For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui
 - Login: the DataCite account ID
 - Password: the DataCite password
 
-Only Login and Password are used. Leave Description, Host, Schema, Port, and Extra empty.
-
 Create the connection before running `datacite_ingest`; `fetch_release` fails if it is missing. `datacite_conn_name` defaults to `datacite`.
-
-Airflow stores the connection in its metadata database and encrypts it with the [Fernet key](#rotating-the-fernet-key). Stack deployments do not manage the connection. When rotating the credentials, update both the secret and the connection.
 
 ### Hugging Face publish credentials
 

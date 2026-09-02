@@ -23,6 +23,8 @@ parameters:
   DbCredentialsSecretArn: !stack_output dev/rds.yaml::DbCredentialsSecretArn
   # Created outside CloudFormation; see docs/airflow.md.
   FernetSecretArn: "{{ var.fernet_secret_arn }}"
+  # Created outside CloudFormation; see docs/setup.md.
+  SlackWebhookSecretArn: "{{ var.slack_webhook_secret_arn }}"
 
 capabilities:
   - CAPABILITY_IAM

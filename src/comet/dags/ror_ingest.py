@@ -7,6 +7,7 @@ import pendulum
 
 from comet.airflow import BaseDagParams
 from comet.airflow.assets import ROR_RELEASE_ASSET
+from comet.airflow.notifications import alert_kwargs, optional_slack_date, slack_notifier
 from comet.airflow.utils import build_release_asset_metadata, get_current_run_id
 from comet.aws import run_prefix, s3_uri
 from comet.constants import ROR_SOURCE
@@ -38,8 +39,10 @@ def create_ror_ingest_dag(dag_id: str, params: RorIngestParams) -> DAG:
 
     @dag(
         dag_id=dag_id,
+        description="Ingest new ROR releases.",
         schedule="@daily",
         **params.dag_kwargs(),
+        **alert_kwargs(params.deadline_minutes),
     )
     def ror_dag():
         @task
@@ -76,7 +79,17 @@ def create_ror_ingest_dag(dag_id: str, params: RorIngestParams) -> DAG:
                 source_prefix=run_prefix(dag_id, run_id),
             )
 
-        @task(outlets=[ROR_RELEASE_ASSET])
+        @task(
+            outlets=[ROR_RELEASE_ASSET],
+            on_success_callback=slack_notifier(
+                ":large_green_circle:",
+                "ROR release ingested",
+                "{% set release = ti.xcom_pull(task_ids='fetch_release') %}"
+                "*Release date:* {{ release.release_date }}\n"
+                "*File:* {{ release.file_name }}\n"
+                f"*Completed:* {optional_slack_date('ti.end_date')}",
+            ),
+        )
         def publish_release_asset(release: dict):
             release = DatasetRelease.from_dict(release)
             yield build_release_asset_metadata(

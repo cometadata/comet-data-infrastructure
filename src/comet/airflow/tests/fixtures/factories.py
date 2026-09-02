@@ -1,9 +1,3 @@
-"""Test-only factory targets exercised by the loader tests.
-
-These intentionally avoid importing airflow so the loader test suite can
-run without apache-airflow installed.
-"""
-
 from __future__ import annotations
 
 from comet.airflow.factory import BaseDagParams

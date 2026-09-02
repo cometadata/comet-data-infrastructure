@@ -8,7 +8,7 @@ version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "boto3>=1,<2",
-    "pyarrow>=19,<25",
+    "pyarrow>=19,<26",
     "cyclopts>=4,<5",
     "tqdm>=4,<5",
     "pendulum>=3.2.0",
@@ -35,8 +35,9 @@ notebooks = [
     "duckdb_engine>=0.17.0,<1",
 ]
 airflow = [
-    "apache-airflow-providers-amazon[aiobotocore]>=9.31.0",
-    "apache-airflow[amazon,fab,postgres,standard]==3.3.0",
+    "apache-airflow-providers-amazon[aiobotocore]>=9.34.0",
+    "apache-airflow-providers-slack>=9.10.2,<10",
+    "apache-airflow[amazon,fab,postgres,standard]==3.3.1",
 ]
 
 [project.scripts]

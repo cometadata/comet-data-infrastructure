@@ -9,6 +9,7 @@ parameters:
   DataCiteCredentialsSecretArn: "{{ var.datacite_credentials_secret_arn }}"
   Env: "{{ var.env }}"
   FernetSecretArn: "{{ var.fernet_secret_arn }}"
+  SlackWebhookSecretArn: "{{ var.slack_webhook_secret_arn }}"
 
 capabilities:
   - CAPABILITY_IAM

@@ -21,8 +21,8 @@ dags:
   - dag_id: my_dag
     factory: comet.dags.my_dag.create_my_dag
     params:
-      schedule: "@daily"
       start_date: 2026-01-01
+      deadline_minutes: 90
       bucket_name: comet-dev-s3-data
 ```
 
@@ -34,13 +34,14 @@ Set `enabled: false` on an entry to skip it without removing it.
 
 ## Writing a factory
 
-A factory is a plain function in the `comet.dags` package with the signature `(dag_id: str, params: <BaseDagParams subclass>) -> DAG`. The loader discovers the params class from the type annotation; no decorator or registration. `BaseDagParams` provides `schedule`, `start_date`, `end_date`, `catchup`, `tags`, `description`, and `max_active_runs`, with `extra='forbid'` so a typo in the YAML fails at parse time.
+A factory is a plain function in the `comet.dags` package with the signature `(dag_id: str, params: <BaseDagParams subclass>) -> DAG`. The loader discovers the params class from the type annotation; no decorator or registration. `BaseDagParams` provides `start_date`, `end_date`, `catchup`, `tags`, `max_active_runs`, and `deadline_minutes`, with `extra='forbid'` so a typo in the YAML fails at parse time.
 
 ```python
 # src/comet/dags/my_dag.py
 from __future__ import annotations
 from airflow import DAG
 from comet.airflow import BaseDagParams
+from comet.airflow.notifications import alert_kwargs
 
 
 class MyDagParams(BaseDagParams):
@@ -48,12 +49,14 @@ class MyDagParams(BaseDagParams):
 
 
 def create_my_dag(dag_id: str, params: MyDagParams) -> DAG:
-    with DAG(dag_id=dag_id, **params.dag_kwargs()) as dag:
+    with DAG(dag_id=dag_id, **params.dag_kwargs(), **alert_kwargs(params.deadline_minutes)) as dag:
         ...
     return dag
 ```
 
 The reference implementation is `src/comet/dags/ror_ingest.py`.
+
+`deadline_minutes` defaults to 90 and starts when the DAG run is queued. `alert_kwargs(...)` adds task-failure and deadline notifications. For status messages, add a `slack_notifier(...)` success callback to a task; skipped tasks do not notify. See `src/comet/dags/ror_ingest.py` for an example.
 
 ## Failure behaviour
 

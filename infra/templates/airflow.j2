@@ -3,7 +3,7 @@
 {%- set api_server_name = "api-server" %}
 {%- set api_url = "http://" ~ api_server_name ~ "." ~ dns_namespace ~ ":8080" %}
 
-{#- Secrets for the services. Workers get none. #}
+{#- Secrets for the services. Workers only get the Slack webhook connection. #}
 {%- macro common_secrets() %}
             - Name: AIRFLOW__CORE__FERNET_KEY
               ValueFrom: !Ref FernetSecretArn
@@ -118,6 +118,14 @@ Parameters:
 
   FernetSecretArn:
     Type: String
+
+  SlackWebhookSecretArn:
+    Type: String
+
+  UiBaseUrl:
+    Type: String
+    Default: 'http://localhost:8080'
+    Description: Airflow UI address used in Slack links; the default suits the port-forward.
 
 Resources:
   JwtSecret:
@@ -296,6 +304,17 @@ Resources:
             Action: 'sts:AssumeRole'
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+        - PolicyName: worker-exec-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                  - 'secretsmanager:DescribeSecret'
+                Resource:
+                  - !Ref SlackWebhookSecretArn
 
   AirflowWorkerTaskRole:
     Type: 'AWS::IAM::Role'
@@ -521,6 +540,9 @@ Resources:
           Environment:
             - Name: AIRFLOW__CORE__EXECUTOR
               Value: LocalExecutor
+            # Send parse logs to stdout so DAG import errors reach CloudWatch.
+            - Name: AIRFLOW__LOGGING__DAG_PROCESSOR_LOG_TARGET
+              Value: stdout
 {{- common_env(api_url) }}
 {{- dag_bundle_env(60) }}
           Secrets:
@@ -628,8 +650,11 @@ Resources:
               Value: LocalExecutor
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES
               Value: 'False'
+            # Slack links use the UI address; the Execution API stays on the internal one.
             - Name: AIRFLOW__API__BASE_URL
-              Value: '{{ api_url }}'
+              Value: !Ref UiBaseUrl
+            - Name: AIRFLOW__CORE__EXECUTION_API_SERVER_URL
+              Value: '{{ api_url }}/execution/'
             - Name: AWS_DEFAULT_REGION
               Value: !Ref AWS::Region
             # Read by the comet package.
@@ -638,6 +663,11 @@ Resources:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
 {{ dag_bundle_env(86400) }}
+          Secrets:
+            # Deadline callbacks cannot read connections through the Execution API, so
+            # workers resolve the Slack connection from the environment instead.
+            - Name: AIRFLOW_CONN_SLACK_DEFAULT
+              ValueFrom: !Ref SlackWebhookSecretArn
           LogConfiguration:
             LogDriver: awslogs
             Options:
