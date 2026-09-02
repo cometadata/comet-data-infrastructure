@@ -31,12 +31,11 @@ def enrich_resource_type_general(
     output_uri: str,
     source_release_date: list[str],
     rules_uri: str,
-    provenance_uri: str,
+    source_id: str,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ):
     """Reclassify ``types.resourceTypeGeneral`` over the DataCite snapshot."""
     rules = download_config(rules_uri)
-    provenance = download_config(provenance_uri)
     with transform_task(
         input_uri,
         output_uri,
@@ -53,8 +52,8 @@ def enrich_resource_type_general(
                 str(ctx.transform_dir),
                 "--rules",
                 str(rules),
-                "--provenance",
-                str(provenance),
+                "--source-id",
+                source_id,
                 *(arg for value in source_release_date for arg in ("--source-release-date", value)),
                 "--output-writer-lanes",
                 str(output_writer_lanes),
@@ -96,12 +95,11 @@ def enrich_funders(
     output_uri: str,
     source_release_date: list[str],
     ror_data_uri: str,
-    provenance_uri: str,
+    source_id: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ):
     """Match DataCite funder names to ROR IDs."""
-    provenance = download_config(provenance_uri)
     ror_data = prepare_ror_data(ror_data_uri)
     try:
         with transform_task(
@@ -118,8 +116,8 @@ def enrich_funders(
                     str(ctx.download_dir),
                     "--output",
                     str(ctx.transform_dir),
-                    "--provenance",
-                    str(provenance),
+                    "--source-id",
+                    source_id,
                     *(arg for value in source_release_date for arg in ("--source-release-date", value)),
                     "--ror-file",
                     str(ror_data),
@@ -138,12 +136,11 @@ def enrich_affiliations(
     input_uri: str,
     output_uri: str,
     source_release_date: list[str],
-    provenance_uri: str,
+    source_id: str,
     ror_service_url: str = DEFAULT_ROR_SERVICE_URL,
     output_writer_lanes: int = DEFAULT_OUTPUT_WRITER_LANES,
 ):
     """Match DataCite affiliation strings to ROR IDs."""
-    provenance = download_config(provenance_uri)
     with transform_task(
         input_uri,
         output_uri,
@@ -158,8 +155,8 @@ def enrich_affiliations(
                 str(ctx.download_dir),
                 "--output",
                 str(ctx.transform_dir),
-                "--provenance",
-                str(provenance),
+                "--source-id",
+                source_id,
                 *(arg for value in source_release_date for arg in ("--source-release-date", value)),
                 "--ror-service-url",
                 ror_service_url,

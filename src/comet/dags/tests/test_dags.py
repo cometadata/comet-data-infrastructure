@@ -53,6 +53,7 @@ REPO_ROOT = Path(comet.__file__).parents[2]
 EXAMPLE_CONFIG = REPO_ROOT / "dags" / "dags.yaml.example"
 
 START_DATE = datetime.datetime(2026, 1, 1)
+SOURCE_ID = "10.1234/example"
 COMPLETED = datetime.datetime(2026, 8, 30, 23, 20, 42, tzinfo=datetime.UTC)
 COMPLETED_TOKEN = "<!date^1788132042^{date_short_pretty} at {time_secs}|2026-08-30 23:20:42+00:00>"
 HF_ENDPOINT_URL = "https://s3.hf.co/test-namespace"
@@ -132,7 +133,7 @@ DAG_CASES = [
     DagCase(
         "datacite_enrich_resource_type_general",
         create_datacite_enrich_resource_type_general_dag,
-        DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
+        DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         [DATACITE_RELEASE_ASSET],
         {
             "fetch_datacite_release": {"enrich", "persist_release", "publish_release_asset"},
@@ -144,7 +145,7 @@ DAG_CASES = [
     DagCase(
         "datacite_enrich_funders",
         create_datacite_enrich_funders_dag,
-        DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
+        DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         [DATACITE_RELEASE_ASSET],
         {
             "fetch_datacite_release": {"enrich", "persist_release", "publish_release_asset"},
@@ -188,7 +189,7 @@ DAG_CASES = [
     DagCase(
         "datacite_enrich_affiliations",
         create_datacite_enrich_affiliations_dag,
-        DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
+        DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         [DATACITE_RELEASE_ASSET],
         {
             "fetch_datacite_release": {"enrich", "persist_release", "publish_release_asset"},
@@ -222,19 +223,19 @@ class EnrichCase(NamedTuple):
 ENRICH_CASES = [
     EnrichCase(
         create_datacite_enrich_funders_dag,
-        DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
+        DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         "datacite-funders",
         uses_ror=True,
     ),
     EnrichCase(
         create_datacite_enrich_affiliations_dag,
-        DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
+        DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         "datacite-affiliations",
         uses_ror=True,
     ),
     EnrichCase(
         create_datacite_enrich_resource_type_general_dag,
-        DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
+        DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         "datacite-resource-type-general",
         uses_ror=False,
     ),
@@ -506,6 +507,20 @@ class TestEnrichFetchRorRelease:
         assert resolved == {"release_date": "2026-02-03", "uri": "s3://test-bucket/ror_ingest/ror-run/ror.zip"}
 
 
+class TestEnrichBatchCommand:
+    @pytest.mark.parametrize("case", ENRICH_CASES, ids=lambda c: c.dataset)
+    def test_passes_source_id_from_params(self, case):
+        dag = case.factory("enrich_test", case.params)
+        enrich = dag.get_task("enrich")
+        if enrich.ecs_properties_override:
+            containers = enrich.ecs_properties_override["taskProperties"][0]["containers"]
+            command = next(c for c in containers if c["name"] == "main")["command"]
+        else:
+            command = enrich.container_overrides["command"]
+
+        assert command[command.index("--source-id") + 1] == "{{ params.source_id }}"
+
+
 class TestPruneReleasesDag:
     @pytest.fixture
     def dag(self):
@@ -638,19 +653,19 @@ class TestPersistRelease:
         ),
         (
             create_datacite_enrich_funders_dag,
-            DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket"),
+            DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
             "datacite-funders",
             "persist_release",
         ),
         (
             create_datacite_enrich_affiliations_dag,
-            DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket"),
+            DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
             "datacite-affiliations",
             "persist_release",
         ),
         (
             create_datacite_enrich_resource_type_general_dag,
-            DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket"),
+            DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
             "datacite-resource-type-general",
             "persist_release",
         ),

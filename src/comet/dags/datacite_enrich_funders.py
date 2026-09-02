@@ -69,12 +69,6 @@ def create_datacite_enrich_funders_dag(dag_id: str, params: DataCiteEnrichFunder
                 title="ROR release date",
                 description="Which ROR release to use (YYYY-MM-DD). Empty = latest ROR release.",
             ),
-            "provenance_path": Param(
-                "enrichment-configs/funders-provenance.yaml",
-                type="string",
-                title="Provenance path",
-                description="S3 path (within the bucket) of the funders provenance YAML.",
-            ),
         },
         user_defined_macros={
             "get_env": get_env,
@@ -165,8 +159,8 @@ def create_datacite_enrich_funders_dag(dag_id: str, params: DataCiteEnrichFunder
                                     "ror={{ ti.xcom_pull(task_ids='fetch_ror_release')['release_date'] }}",
                                     "--ror-data-uri",
                                     ror_data_uri,
-                                    "--provenance-uri",
-                                    s3_uri(params.bucket_name, "{{ params.provenance_path }}"),
+                                    "--source-id",
+                                    "{{ params.source_id }}",
                                     "--output-writer-lanes",
                                     WRITER_LANES,
                                 ],
