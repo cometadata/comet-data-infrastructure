@@ -304,6 +304,16 @@ Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Man
 - Airflow task logs (what the UI shows): `s3://<stackname>-airflow-logs/logs/`.
 - Batch jobs: CloudWatch `/comet/<env>/batch/job`.
 
+## Recovering a failed enrichment
+
+Failure details are available in the [Batch logs](#logs). Partial output may be available at `s3://<data-bucket>/{dag_id}/{run_id}/full/`. Retrying the failed `enrich` task in Airflow replaces that run's output.
+
+## Re-running a published release
+
+A published release can be replaced by re-running its enrichment DAG with `datacite_release_date` set to the DataCite release date and `replace_published` enabled. For funders and affiliations, also set `ror_release_date` to the ROR release used by the original run. The source snapshots must still be available. Publishing the replacement overwrites the existing Hugging Face release folders and updates the release index.
+
+**Warning:** Replacing releases out of order can invalidate subsequent diffs.
+
 ## Rotating the Fernet key
 
 The Fernet key lives in the `comet-dev-airflow-fernet` Secrets Manager secret, created outside CloudFormation and passed in by ARN (`fernet_secret_arn` in `vars-dev.yaml`), so stack updates and deletes never touch it.

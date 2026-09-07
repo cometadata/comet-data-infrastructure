@@ -172,7 +172,7 @@ class TestTransformTask:
         assert not expected_transform.exists()
 
     @pytest.mark.parametrize("failure", ["download", "body", "upload"])
-    def test_cleans_without_partial_upload_when_task_fails(self, mocker, scratch_root, failure):
+    def test_failure_uploads_output_written_so_far_then_cleans(self, mocker, scratch_root, failure):
         mocker.patch("comet.aws.s5cmd_clean_prefix")
 
         def fail_after_partial_download(source_uri, target_dir):
@@ -197,8 +197,10 @@ class TestTransformTask:
                 if failure == "body":
                     raise RuntimeError("body failed")
 
-        if failure != "upload":
+        if failure == "download":
             mock_upload.assert_not_called()
+        else:
+            mock_upload.assert_called_once_with(stage_dir / "transform", target_uri, "*", ())
         assert not stage_dir.exists()
 
 

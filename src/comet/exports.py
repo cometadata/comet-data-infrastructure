@@ -13,9 +13,22 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from comet.aws import local_dir_for_uri, s3_uri, s5cmd_clean_prefix, s5cmd_download_files, s5cmd_upload_files
-from comet.constants import Enrichment, enrichments_for_source
-from comet.dynamodb_store import DatasetReleaseRecord, get_release, list_releases, mark_published
+from comet.aws import (
+    local_dir_for_uri,
+    s3_uri,
+    s3_uri_has_files,
+    s5cmd_clean_prefix,
+    s5cmd_download_files,
+    s5cmd_upload_files,
+)
+from comet.constants import DIFF_RELEASE_TYPE, FULL_RELEASE_TYPE, Enrichment, enrichments_for_source
+from comet.dynamodb_store import (
+    DatasetReleaseRecord,
+    get_latest_published_release,
+    get_release,
+    list_releases,
+    mark_published,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -27,26 +40,24 @@ log = logging.getLogger(__name__)
 INDEX_SCHEMA_VERSION = 1
 HF_S3_REGION = "us-east-1"
 
-# Shared by the release folder path and the recorded release type so they cannot disagree.
-FULL_RELEASE_TYPE = "full"
-
 
 def index_key(source: str) -> str:
     """Return the release index key for a source on the export bucket."""
     return f"{source}/index.json"
 
 
-def full_release_prefix(enrichment: Enrichment, release_date: str) -> str:
-    """Return the export bucket key prefix for an enrichment's full release.
+def release_prefix(enrichment: Enrichment, release_date: str, release_type: str) -> str:
+    """Return the export bucket prefix for a full or diff release.
 
     Args:
         enrichment: The enrichment being published.
         release_date: ISO date string "YYYY-MM-DD".
+        release_type: ``FULL_RELEASE_TYPE`` or ``DIFF_RELEASE_TYPE``.
 
     Returns:
         The key prefix, e.g. "datacite/funders/2026-01-02/full/".
     """
-    return f"{enrichment.source.identifier}/{enrichment.method}/{release_date}/{FULL_RELEASE_TYPE}/"
+    return f"{enrichment.source.identifier}/{enrichment.method}/{release_date}/{release_type}/"
 
 
 def hf_credentials() -> tuple[str, str]:
@@ -143,23 +154,32 @@ def indexed_release_prefixes(*, source: str, hf_bucket: str, s3_client: BaseClie
 
 
 def copy_release_to_hf(
-    *, source_uri: str, hf_bucket: str, hf_prefix: str, endpoint_url: str, s3_client: BaseClient, env: dict[str, str]
+    *,
+    source_uri: str,
+    hf_bucket: str,
+    hf_prefix: str,
+    endpoint_url: str,
+    s3_client: BaseClient,
+    env: dict[str, str],
 ) -> None:
-    """Copy one release's files from the data bucket to the Hugging Face bucket.
+    """Copy one release directory from the data bucket to the Hugging Face bucket.
 
-    Stages the run prefix to local disk, then uploads it to the release folder on the
-    Hugging Face bucket. If a previous attempt left objects in the target folder, they are
-    removed first so a re-publish cannot leave stale shards behind. Other releases are
-    never touched.
+    Stages files locally and clears the target folder before uploading to remove
+    stale files from previous attempts. Removes local files on success or failure.
 
     Args:
-        source_uri: S3 URI of the enrich run prefix on the data bucket (trailing slash).
+        source_uri: S3 URI of the release directory on the data bucket (trailing slash).
         hf_bucket: The Hugging Face bucket name.
-        hf_prefix: The release folder key prefix, from :func:`full_release_prefix`.
+        hf_prefix: The release folder key prefix, from :func:`release_prefix`.
         endpoint_url: The Hugging Face S3-compatible endpoint URL.
         s3_client: Client for the Hugging Face endpoint.
         env: Subprocess environment from :func:`hf_env`.
+
+    Raises:
+        RuntimeError: If the source directory has no ``manifest.json``.
     """
+    if not s3_uri_has_files(f"{source_uri}manifest.json"):
+        raise RuntimeError(f"No manifest.json under {source_uri}; refusing to publish an incomplete release")
     target_uri = s3_uri(hf_bucket, hf_prefix)
     stage_dir = local_dir_for_uri(target_uri)
     shutil.rmtree(stage_dir, ignore_errors=True)
@@ -170,6 +190,22 @@ def copy_release_to_hf(
         s5cmd_upload_files(stage_dir, target_uri, endpoint_url=endpoint_url, env=env)
     finally:
         shutil.rmtree(stage_dir, ignore_errors=True)
+
+
+def index_entry(record: DatasetReleaseRecord, release_type: str, path: str) -> dict:
+    """Return one release index entry.
+
+    Args:
+        record: The published release record.
+        release_type: ``FULL_RELEASE_TYPE`` or ``DIFF_RELEASE_TYPE``.
+        path: The release's key prefix on the export bucket.
+    """
+    return {
+        "release_date": record.release_date,
+        "type": release_type,
+        "path": path,
+        "published_at": record.published_at,
+    }
 
 
 def render_index(source: str, records_by_enrichment: Mapping[Enrichment, Sequence[DatasetReleaseRecord]]) -> dict:
@@ -187,19 +223,16 @@ def render_index(source: str, records_by_enrichment: Mapping[Enrichment, Sequenc
     datasets: dict[str, dict] = {}
     for enrichment, records in records_by_enrichment.items():
         published = sorted((r for r in records if r.published_at), key=lambda r: r.release_date)
-        if not published:
+        # Put each full release last so latest below points to a full snapshot.
+        entries: list[dict] = []
+        for record in published:
+            if record.diff_export_path:
+                entries.append(index_entry(record, DIFF_RELEASE_TYPE, record.diff_export_path))
+            entries.append(index_entry(record, FULL_RELEASE_TYPE, record.export_path))
+        if not entries:
             continue
-        releases = [
-            {
-                "release_date": record.release_date,
-                "type": record.release_type,
-                "path": record.export_path,
-                "published_at": record.published_at,
-            }
-            for record in published
-        ]
-        latest = {key: releases[-1][key] for key in ("release_date", "type", "path")}
-        datasets[enrichment.method] = {"latest": latest, "releases": releases}
+        latest = {key: entries[-1][key] for key in ("release_date", "type", "path")}
+        datasets[enrichment.method] = {"latest": latest, "releases": entries}
 
     return {
         "schema_version": INDEX_SCHEMA_VERSION,
@@ -227,28 +260,37 @@ def publish_index(*, source: str, hf_bucket: str, s3_client: BaseClient) -> None
 
 
 def publish_releases(
-    *, source: str, release_date: str, source_uris: Mapping[str, str], hf_bucket: str, endpoint_url: str
+    *,
+    source: str,
+    release_date: str,
+    datasets: Sequence[str],
+    data_bucket: str,
+    hf_bucket: str,
+    endpoint_url: str,
 ) -> None:
     """Publish a source's enrichment releases for a snapshot date, then commit the index.
 
-    Publishes only the datasets present in ``source_uris``. Datasets already marked
-    published are skipped, so re-running after a partial failure copies only what is
-    missing before re-uploading the index.
+    Skips datasets already marked published. Marks each remaining dataset published
+    after copying its full and any diff directory. A retry replaces both directories
+    if the previous attempt failed before marking the dataset published.
 
     Args:
         source: The source dataset name, e.g. "datacite".
         release_date: ISO date string "YYYY-MM-DD" of the snapshot to publish.
-        source_uris: Enrich run prefix S3 URI on the data bucket, keyed by dataset.
+        datasets: The dataset identifiers to publish, e.g. "datacite-funders".
+        data_bucket: The data bucket holding the release directories.
         hf_bucket: The Hugging Face bucket name.
         endpoint_url: The Hugging Face S3-compatible endpoint URL.
 
     Raises:
         ValueError: If the source is unknown.
         RuntimeError: If a dataset is unknown, has no release record for ``release_date``,
-            or its release prefix is already referenced by the live index.
+            has no full directory, has a diff whose baseline is not the newest published
+            release, or its release prefix is referenced by the live index and was not
+            published from this record.
     """
     enrichments = {e.identifier: e for e in enrichments_for_source(source)}
-    unknown = set(source_uris) - set(enrichments)
+    unknown = set(datasets) - set(enrichments)
     if unknown:
         raise RuntimeError(f"Unknown dataset(s): {', '.join(sorted(unknown))}")
 
@@ -257,27 +299,50 @@ def publish_releases(
     s3_client = hf_s3_client(endpoint_url)
     indexed = indexed_release_prefixes(source=source, hf_bucket=hf_bucket, s3_client=s3_client)
 
-    for dataset, source_uri in source_uris.items():
+    for dataset in datasets:
         record = get_release(dataset=dataset, release_date=release_date)
         if record is None:
             raise RuntimeError(f"No release record for {dataset}/{release_date}")
         if record.published_at:
             log.info(f"Skipping {dataset} {release_date}: already published")
             continue
-        hf_prefix = full_release_prefix(enrichments[dataset], release_date)
-        if hf_prefix.rstrip("/") in indexed:
-            raise RuntimeError(
-                f"Release prefix {s3_uri(hf_bucket, hf_prefix)} is already referenced by {index_key(source)}"
+        if not record.full_source_prefix:
+            raise RuntimeError(f"Release record for {dataset}/{release_date} has no full_source_prefix")
+        if record.diff_source_prefix:
+            newest = get_latest_published_release(dataset=dataset)
+            if newest is None or newest.release_date != record.diff_base_release_date:
+                raise RuntimeError(
+                    f"Diff for {dataset}/{release_date} was cut against {record.diff_base_release_date} "
+                    f"but the newest published release is {newest.release_date if newest else 'none'}"
+                )
+        enrichment = enrichments[dataset]
+
+        artifacts = [(FULL_RELEASE_TYPE, record.full_source_prefix)]
+        if record.diff_source_prefix:
+            artifacts.append((DIFF_RELEASE_TYPE, record.diff_source_prefix))
+        # A re-run with replace_published keeps the export paths it may overwrite.
+        own_prefixes = {record.export_path, record.diff_export_path}
+        export_paths = {}
+        for release_type, source_prefix in artifacts:
+            hf_prefix = release_prefix(enrichment, release_date, release_type)
+            if hf_prefix.rstrip("/") in indexed and hf_prefix not in own_prefixes:
+                raise RuntimeError(
+                    f"Release prefix {s3_uri(hf_bucket, hf_prefix)} is already referenced by {index_key(source)}"
+                )
+            copy_release_to_hf(
+                source_uri=s3_uri(data_bucket, source_prefix),
+                hf_bucket=hf_bucket,
+                hf_prefix=hf_prefix,
+                endpoint_url=endpoint_url,
+                s3_client=s3_client,
+                env=env,
             )
-        copy_release_to_hf(
-            source_uri=source_uri,
-            hf_bucket=hf_bucket,
-            hf_prefix=hf_prefix,
-            endpoint_url=endpoint_url,
-            s3_client=s3_client,
-            env=env,
-        )
+            export_paths[release_type] = hf_prefix
         mark_published(
-            dataset=dataset, release_date=release_date, export_path=hf_prefix, release_type=FULL_RELEASE_TYPE
+            dataset=dataset,
+            release_date=release_date,
+            export_path=export_paths[FULL_RELEASE_TYPE],
+            diff_export_path=export_paths.get(DIFF_RELEASE_TYPE),
+            expected_updated_at=record.updated_at,
         )
     publish_index(source=source, hf_bucket=hf_bucket, s3_client=s3_client)

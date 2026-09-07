@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from airflow import DAG  # noqa: TC002  # loader's get_type_hints() evaluates the `-> DAG` return at runtime
 from airflow.providers.amazon.aws.operators.batch import BatchOperator
-from airflow.sdk import Param, dag, get_current_context, task
+from airflow.sdk import Param, dag
 
 from comet.airflow.assets import DATACITE_AFFILIATIONS_ASSET, DATACITE_RELEASE_ASSET
 from comet.airflow.notifications import alert_kwargs
-from comet.airflow.utils import (
-    build_release_asset_metadata,
-    get_current_run_id,
-    get_triggering_release_key_or_none,
-    resolve_release_record,
-)
 from comet.aws import (
     BATCH_JOB_TAGS,
     batch_job_definition_name,
@@ -20,10 +14,17 @@ from comet.aws import (
     run_prefix,
     s3_uri,
 )
-from comet.constants import DATACITE_AFFILIATIONS_ENRICHMENT, DATACITE_SOURCE, ROR_SOURCE
+from comet.constants import DATACITE_AFFILIATIONS_ENRICHMENT, FULL_DIR
 from comet.dags.datacite_enrich_params import DataCiteEnrichAffiliationsParams, enrich_trigger_params
-import comet.dynamodb_store as dataset_releases
-from comet.model.dataset_version_model import DatasetRelease
+from comet.dags.tasks import (
+    check_enrichment_unpublished,
+    diff_release,
+    fetch_datacite_release,
+    fetch_ror_release,
+    persist_enrichment_release,
+    publish_release_asset,
+    resolve_previous_release,
+)
 from comet.utils import get_env
 
 OPENSEARCH_VCPU = "10"
@@ -80,26 +81,6 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
         **alert_kwargs(params.deadline_minutes),
     )
     def enrich_dag():
-        @task
-        def fetch_datacite_release() -> dict:
-            key = get_triggering_release_key_or_none(DATACITE_RELEASE_ASSET)
-            release_date = get_current_context()["params"]["release_date"]
-            record = resolve_release_record(
-                dataset=DATACITE_SOURCE.identifier, release_date=release_date, triggering_key=key
-            )
-
-            return record.to_dataset_release().to_dict()
-
-        @task
-        def fetch_ror_release() -> dict:
-            run_params = get_current_context()["params"]
-            record = resolve_release_record(dataset=ROR_SOURCE.identifier, release_date=run_params["ror_release_date"])
-
-            return {
-                "release_date": record.release_date,
-                "uri": s3_uri(params.bucket_name, run_params["ror_dag_id"], record.run_id, record.file_name),
-            }
-
         ror_data_uri = "{{ ti.xcom_pull(task_ids='fetch_ror_release')['uri'] }}"
         datacite_input_uri = s3_uri(
             params.bucket_name,
@@ -107,6 +88,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                 "{{ params.datacite_dag_id }}", "{{ ti.xcom_pull(task_ids='fetch_datacite_release')['run_id'] }}"
             ),
         )
+        run_uri = s3_uri(params.bucket_name, run_prefix(dag_id, "{{ run_id }}"))
 
         # Multi-container job: overrides go through ecs_properties_override.
         enrich = BatchOperator(
@@ -152,7 +134,7 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
                                     "--input-uri",
                                     datacite_input_uri,
                                     "--output-uri",
-                                    s3_uri(params.bucket_name, run_prefix(dag_id, "{{ run_id }}")),
+                                    run_uri + FULL_DIR,
                                     "--source-release-date",
                                     "datacite={{ ti.xcom_pull(task_ids='fetch_datacite_release')['release_date'] }}",
                                     "--source-release-date",
@@ -171,27 +153,31 @@ def create_datacite_enrich_affiliations_dag(dag_id: str, params: DataCiteEnrichA
             deferrable=True,
         )
 
-        @task
-        def persist_release(release: dict):
-            run_id = get_current_run_id()
-            dataset_releases.persist_discovered_release(
-                dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier,
-                release=DatasetRelease.from_dict(release),
-                run_id=run_id,
-                source_prefix=run_prefix(dag_id, run_id),
-            )
-
-        @task(outlets=[DATACITE_AFFILIATIONS_ASSET])
-        def publish_release_asset(release: dict):
-            release = DatasetRelease.from_dict(release)
-            yield build_release_asset_metadata(
-                asset=DATACITE_AFFILIATIONS_ASSET,
-                dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier,
-                release_date=release.release_date,
-            )
-
-        release_task = fetch_datacite_release()
-        ror_task = fetch_ror_release()
-        [release_task, ror_task] >> enrich >> persist_release(release_task) >> publish_release_asset(release_task)
+        release = fetch_datacite_release()
+        checked = check_enrichment_unpublished(release, dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier)
+        ror = fetch_ror_release(bucket_name=params.bucket_name)
+        previous = resolve_previous_release(release, dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier)
+        diff = diff_release(
+            bucket_name=params.bucket_name,
+            run_uri=run_uri,
+            enrichment=DATACITE_AFFILIATIONS_ENRICHMENT,
+            previous=previous,
+            attempt_timeout=BATCH_ATTEMPT_TIMEOUT,
+        )
+        persisted = persist_enrichment_release(
+            release,
+            dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier,
+            dag_id=dag_id,
+            previous=previous,
+        )
+        publish = publish_release_asset(
+            asset=DATACITE_AFFILIATIONS_ASSET, dataset=DATACITE_AFFILIATIONS_ENRICHMENT.identifier
+        )
+        release >> [enrich, previous]
+        checked >> [enrich, previous]
+        # A skipped diff does not wait for enrich, so persist needs the direct edge.
+        enrich >> persisted
+        ror >> enrich
+        [enrich, previous] >> diff >> persisted >> publish(release)
 
     return enrich_dag()

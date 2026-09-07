@@ -44,11 +44,16 @@ datacite/funders/2026-04-02/full/
     part_0001.jsonl.gz
     ...
   manifest.json
+datacite/funders/2026-04-02/diff/
+  enrichments/
+    part_0000.jsonl.gz
+    ...
+  manifest.json
 datacite/affiliations/...
 datacite/resource-type-general/...
 ```
 
-Each release folder contains the gzip-compressed JSON Lines shards and manifest written by `comet-enrich`.
+Each release folder contains the gzip-compressed JSON Lines shards and manifest written by `comet-enrich`. A `full` release is the complete snapshot for that date; a `diff` release contains only what changed since the previous published release. A release has no diff when no usable earlier release exists. Published full releases have `"exit_status": "success"` in their manifests; a run that loses data fails before publication.
 
 The manifest identifies the source releases used by the enrichment:
 
@@ -61,9 +66,64 @@ The manifest identifies the source releases used by the enrichment:
 }
 ```
 
+## Diff releases
+
+Every enrichment record carries an enrichment content key in its `key` field. It
+identifies the content being enriched, scoped by method, DOI, field, and action.
+Updates and deletions derive their key from `originalValue`; inserts use
+`enrichedValue`.
+
+Diff records add an `event` field describing what changed relative to the previous
+published release:
+
+| Event        | Meaning                              | Consumer action        |
+|--------------|--------------------------------------|------------------------|
+| `asserted`   | Key present now, absent before.      | Apply the enrichment.  |
+| `retracted`  | Key present before, absent now.      | Remove the enrichment. |
+| `superseded` | Same key, different `enrichedValue`. | Replace it in place.   |
+
+For updates, changing only `enrichedValue` preserves the content key and produces a
+`superseded` event. Changing an inserted value changes its content key, producing a
+`retracted` event for the old key and an `asserted` event for the new key. Unchanged
+enrichments produce no events; changes to `sourceId` alone also produce no events.
+
+```json
+{"doi":"10.1/x","action":"update","field":"types","originalValue":{"resourceTypeGeneral":"Text"},"enrichedValue":{"resourceTypeGeneral":"Dataset"},"sourceId":"10.1234/example","key":"0860ed77af682e5bbe343af4f5e0347c","event":"asserted"}
+```
+
+`asserted` and `superseded` records carry the new values; `retracted` records carry the
+old values. Start with a full release, then apply newer diffs in `release_date` order.
+
+The diff manifest records the two full releases that were compared and the event totals. It
+has no `exit_status`: a diff that cannot be computed cleanly writes no manifest and is not
+published.
+
+```json
+{
+  "schema_version": 1,
+  "method": {
+    "name": "funders",
+    "old_version": "0.4.0",
+    "new_version": "0.4.0",
+    "diff_tool_version": "0.4.0"
+  },
+  "old": {
+    "sources": {"datacite": {"release_date": "2026-03-02"}, "ror": {"release_date": "2026-02-19"}},
+    "records": 1204331
+  },
+  "new": {
+    "sources": {"datacite": {"release_date": "2026-04-02"}, "ror": {"release_date": "2026-03-19"}},
+    "records": 1210842
+  },
+  "artifact_paths": {"enrichments": "enrichments/"},
+  "counters": {"asserted": 6900, "retracted": 389, "superseded": 1120, "unchanged": 1202822},
+  "timings_ms": {"total": 184211}
+}
+```
+
 ## Release index
 
-The `datacite/index.json` file lists the available releases for every DataCite enrichment method and identifies the latest release. Consumers can use this index to detect new releases without listing the contents of the bucket.
+The `datacite/index.json` file lists the available releases for every DataCite enrichment method. Use it to detect new releases without listing the bucket. `latest` points to the newest full release. The `releases` list is sorted by date, with each diff before the full release of the same date.
 
 ```json
 {
@@ -78,6 +138,18 @@ The `datacite/index.json` file lists the available releases for every DataCite e
           "path": "datacite/funders/2026-04-02/full/"
         },
         "releases": [
+          {
+            "release_date": "2026-03-02",
+            "type": "full",
+            "path": "datacite/funders/2026-03-02/full/",
+            "published_at": "2026-03-02T12:13:00+00:00"
+          },
+          {
+            "release_date": "2026-04-02",
+            "type": "diff",
+            "path": "datacite/funders/2026-04-02/diff/",
+            "published_at": "2026-04-02T12:25:00+00:00"
+          },
           {
             "release_date": "2026-04-02",
             "type": "full",
@@ -95,4 +167,5 @@ The `datacite/index.json` file lists the available releases for every DataCite e
 
 - Download `datacite/index.json` periodically.
 - Compare each method's `latest.release_date` with the last release date you ingested.
-- If a newer release is available, download the shards from the `enrichments/` directory under `latest.path`.
+- To reload from scratch, download the shards from the `enrichments/` directory under `latest.path`.
+- To update incrementally, process newer releases in `release_date` order: apply each available diff's events (`asserted`, `retracted`, `superseded`).

@@ -11,7 +11,7 @@ from pydantic import field_validator
 from comet.airflow import BaseDagParams
 from comet.airflow.notifications import alert_kwargs, optional_slack_date, slack_notifier
 from comet.airflow.utils import resolve_release_record, skip_asset_fail_manual
-from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name, s3_uri
+from comet.aws import BATCH_JOB_TAGS, batch_job_definition_name, batch_job_name, batch_job_queue_name
 from comet.constants import enrichments_for_source
 from comet.utils import get_env
 
@@ -111,11 +111,11 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
                     record = resolve_release_record(dataset=dataset, release_date=run_params["release_date"])
                 except AirflowException as error:
                     skip_asset_fail_manual(f"Release for {dataset} is not ready", error)
-                # Outside the try: a missing source_prefix is a data problem, never "not ready".
-                if not record.source_prefix:
+                # Keep outside the try so a missing prefix fails asset-triggered runs too.
+                if not record.full_source_prefix:
                     raise AirflowException(
-                        f"Release record for {dataset}/{record.release_date} has no source_prefix; "
-                        "re-run its enrich DAG to refresh the record"
+                        f"Release record for {dataset}/{record.release_date} has no full_source_prefix; "
+                        "re-run its enrich DAG or backfill the record"
                     )
                 records[dataset] = record
 
@@ -123,12 +123,7 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
             if len(release_dates) != 1:
                 skip_asset_fail_manual("Latest releases are not aligned: " + ", ".join(sorted(release_dates)))
 
-            return {
-                "release_date": release_dates.pop(),
-                "source_uris": {
-                    dataset: s3_uri(params.bucket_name, record.source_prefix) for dataset, record in records.items()
-                },
-            }
+            return {"release_date": release_dates.pop(), "datasets": sorted(records)}
 
         resolved_xcom = "ti.xcom_pull(task_ids='resolve_releases')"
         publish = BatchOperator(
@@ -138,7 +133,7 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
                 "Enrichments published to Hugging Face",
                 "{% set resolved = " + resolved_xcom + " %}"
                 "*Release date:* {{ resolved.release_date }}\n"
-                "*Datasets:* {{ resolved.source_uris | sort | join(', ') }}\n"
+                "*Datasets:* {{ resolved.datasets | join(', ') }}\n"
                 "*Bucket:* {{ params.hf_bucket_name }}\n"
                 f"*Completed:* {optional_slack_date('ti.end_date')}",
             ),
@@ -158,8 +153,10 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
                     params.source,
                     "--release-date",
                     "{{ " + resolved_xcom + "['release_date'] }}",
-                    "--source-uris",
-                    "{{ " + resolved_xcom + "['source_uris'] | tojson }}",
+                    "--datasets",
+                    "{{ " + resolved_xcom + "['datasets'] | tojson }}",
+                    "--data-bucket",
+                    params.bucket_name,
                     "--hf-bucket",
                     "{{ params.hf_bucket_name }}",
                     "--hf-endpoint-url",

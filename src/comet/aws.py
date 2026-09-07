@@ -448,6 +448,8 @@ def transform_task(
     Stages ``download`` + ``transform`` subdirs under a single local dir keyed by ``target_uri``
     (unique per job: it carries the consuming job's dag_id + run_id). The stage dir and target
     S3 prefix are cleaned before running, so a re-run with the same prefixes is idempotent.
+    On failure, attempts to upload partial output for debugging, then re-raises the
+    original exception.
 
     Keyed by the target, not the source: co-located Batch jobs reading the same upstream snapshot
     would otherwise share ``/data/<source_prefix>`` and clobber each other's in-flight downloads.
@@ -475,6 +477,16 @@ def transform_task(
             transform_dir=transform_dir,
             target_uri=target_uri,
         )
-        yield ctx
+        try:
+            yield ctx
+        except BaseException:
+            # Keep whatever the run wrote for debugging, then let the run's own failure
+            # propagate. An empty dir is skipped because s5cmd errors on a glob with no match.
+            if any(transform_dir.iterdir()):
+                try:
+                    s5cmd_upload_files(transform_dir, target_uri, upload_glob, upload_exclude_patterns)
+                except Exception:
+                    logger.exception(f"Failed to upload partial output to {target_uri}")
+            raise
 
         s5cmd_upload_files(transform_dir, target_uri, upload_glob, upload_exclude_patterns)

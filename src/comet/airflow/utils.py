@@ -163,6 +163,27 @@ def resolve_release_record(
     return record
 
 
+def previous_release(*, dataset: str, release_date: str) -> dict:
+    """Return the latest usable published release before ``release_date`` as a diff baseline.
+
+    Args:
+        dataset: The enrichment dataset identifier, e.g. "datacite-funders".
+        release_date: ISO date string "YYYY-MM-DD" of the current run's release.
+
+    Returns:
+        A dict with the previous release's ``full_source_prefix`` on the data bucket and
+        its ``release_date``.
+
+    Raises:
+        AirflowSkipException: When no earlier published release has an unpruned full directory.
+            The new release is published as a full without a diff.
+    """
+    record = dataset_releases.get_previous_release(dataset=dataset, before=release_date)
+    if record is None:
+        raise AirflowSkipException(f"No earlier published release of {dataset} to diff against; skipping the diff")
+    return {"full_source_prefix": record.full_source_prefix, "release_date": record.release_date}
+
+
 def build_release_asset_metadata(*, asset: Asset, dataset: str, release_date: datetime.date) -> Metadata:
     """Build Airflow asset metadata for a dataset release.
 
