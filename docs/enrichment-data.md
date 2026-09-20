@@ -68,27 +68,28 @@ The manifest identifies the source releases used by the enrichment:
 
 ## Diff releases
 
-Every enrichment record carries an enrichment content key in its `key` field. It
-identifies the content being enriched, scoped by method, DOI, field, and action.
+Every enrichment record carries an enrichment content key in its `contentKey` field.
+It identifies the content being enriched, scoped by method, DOI, field, and action.
 Updates and deletions derive their key from `originalValue`; inserts use
 `enrichedValue`.
 
 Diff records add an `event` field describing what changed relative to the previous
 published release:
 
-| Event        | Meaning                              | Consumer action        |
-|--------------|--------------------------------------|------------------------|
-| `asserted`   | Key present now, absent before.      | Apply the enrichment.  |
-| `retracted`  | Key present before, absent now.      | Remove the enrichment. |
-| `superseded` | Same key, different `enrichedValue`. | Replace it in place.   |
+| Event        | Meaning                                      | Consumer action        |
+|--------------|----------------------------------------------|------------------------|
+| `asserted`   | Content key present now, absent before.      | Apply the enrichment.  |
+| `retracted`  | Content key present before, absent now.      | Remove the enrichment. |
+| `superseded` | Same content key, different `enrichedValue`. | Replace it in place.   |
 
 For updates, changing only `enrichedValue` preserves the content key and produces a
 `superseded` event. Changing an inserted value changes its content key, producing a
-`retracted` event for the old key and an `asserted` event for the new key. Unchanged
-enrichments produce no events; changes to `sourceId` alone also produce no events.
+`retracted` event for the old content key and an `asserted` event for the new content
+key. Unchanged enrichments produce no events; changes to `sourceId` alone also produce
+no events.
 
 ```json
-{"doi":"10.1/x","action":"update","field":"types","originalValue":{"resourceTypeGeneral":"Text"},"enrichedValue":{"resourceTypeGeneral":"Dataset"},"sourceId":"10.1234/example","key":"0860ed77af682e5bbe343af4f5e0347c","event":"asserted"}
+{"doi":"10.1/x","action":"update","field":"types","originalValue":{"resourceTypeGeneral":"Text"},"enrichedValue":{"resourceTypeGeneral":"Dataset"},"sourceId":"10.1234/example","contentKey":"1dc558dae21181dcb1bff9c1c744244f","event":"asserted"}
 ```
 
 `asserted` and `superseded` records carry the new values; `retracted` records carry the
