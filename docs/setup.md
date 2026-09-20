@@ -2,8 +2,15 @@
 
 ## Install
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/),
-then:
+Install the following tools using their installation instructions:
+
+* [uv](https://docs.astral.sh/uv/getting-started/installation/) for the Python environments.
+* [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) for AWS commands.
+* [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) for Airflow UI access.
+* [Docker](https://docs.docker.com/get-started/get-docker/) with [Buildx](https://docs.docker.com/build/concepts/overview/) for local image builds. Docker Desktop includes Buildx.
+* [Amazon ECR Credential Helper](https://github.com/awslabs/amazon-ecr-credential-helper#installing) for Docker authentication to ECR.
+
+Then run:
 
 ```bash
 make install
@@ -12,21 +19,31 @@ make install-infra
 
 These commands create the root and infrastructure environments from `uv.lock` and `infra/uv.lock`, respectively.
 
+## AWS authentication
+
+Configure authentication for your AWS account using the [AWS authentication instructions](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-authentication.html). All AWS commands and scripts in this guide use your configured credentials.
+
 ## Environment variables
 
-Set your AWS profile (must match a profile in `~/.aws/config`) and log in via SSO:
+Export the deployment's ECR registry before image builds, pushes, and promotion:
 
 ```bash
-export AWS_PROFILE=<your-sso-profile>
-aws sso login
+export ECR_REGISTRY=<aws-account-id>.dkr.ecr.<region>.amazonaws.com
 ```
 
-Then export the ECR registry and default region:
+## Docker authentication
 
-```bash
-export ECR_REGISTRY=<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
-export AWS_DEFAULT_REGION=us-east-1
+Add the ECR credential helper to `~/.docker/config.json`, using your `ECR_REGISTRY` value as the registry key:
+
+```json
+{
+  "credHelpers": {
+    "<aws-account-id>.dkr.ecr.<region>.amazonaws.com": "ecr-login"
+  }
+}
 ```
+
+No manual `docker login` is needed. See the [helper's configuration instructions](https://github.com/awslabs/amazon-ecr-credential-helper#configuration) for details.
 
 ## AWS account prerequisites
 
@@ -150,7 +167,7 @@ Run `make sync-vars` whenever `vars-dev.yaml` changes so the deploy project rece
 To deploy the current checkout without going through the pipeline, build and push all three images with a local tag, promote that tag, and launch:
 
 ```bash
-export ECR_REGISTRY=<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
+export ECR_REGISTRY=<aws-account-id>.dkr.ecr.<region>.amazonaws.com
 export IMAGE_TAG="local-$(git rev-parse --short=7 HEAD)"
 make push-all IMAGE_TAG="$IMAGE_TAG"
 make promote SOURCE_TAG="$IMAGE_TAG"
@@ -288,14 +305,19 @@ Scaling down, refreshing, and the nightly shutdown all terminate the instance, w
 
 ## Open the Airflow UI
 
-There is no public ingress and no EC2 host to connect through; the UI is reached by port-forwarding into the api-server Fargate task with ECS Exec (enabled on the service). Set the AWS region, then forward with `session`, passing the ECS cluster name (from the comet-dev-airflow stack outputs or the ECS console) and the `api-server` container:
+The Airflow UI is reached by port-forwarding using the AWS session manager. The `scripts/airflow-ui.sh` script finds the 
+environment's ECS cluster and running api-server Fargate task, then forwards the UI to a local port.
+
+From the repository root, start forwarding:
 
 ```bash
-export AWS_DEFAULT_REGION=us-east-1
-session port <cluster-name> api-server api-server.comet.local 8080:8080
+bash scripts/airflow-ui.sh
 ```
 
-Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Manager console, in the comet-dev-airflow stack's `-admin-password` secret. The api-server resets the admin password to this secret on each start.
+The script accepts optional environment and local-port arguments, defaulting to `dev` and `8080`. If port 8080 is occupied, use `bash scripts/airflow-ui.sh dev 8081` and open <http://localhost:8081>. Keep the terminal open while using Airflow; press Ctrl-C to stop forwarding.
+
+Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Manager console, in the comet-dev-airflow stack's `-admin-password` secret. The api-server resets the admin password to this secret on each start. You can then create
+your own username and password to login after that.
 
 ## Logs
 

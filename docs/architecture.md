@@ -57,7 +57,7 @@ The deployment also relies on several supporting AWS services:
 * Secrets Manager stores the Fernet key, database credentials, admin password, the JWT secret for the Task Execution API, and the API server session signing key.
 * CloudWatch stores container logs.
 
-Inbound traffic from the internet is blocked; the UI is accessed by port-forwarding into the api-server task with ECS Exec (see [setup.md](setup.md)).
+Inbound traffic from the internet is blocked; the UI is accessed by port-forwarding into the api-server task with `scripts/airflow-ui.sh` (see [Open the Airflow UI](setup.md#open-the-airflow-ui)).
 
 ## AWS Batch
 
