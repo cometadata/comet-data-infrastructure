@@ -7,14 +7,19 @@ dependencies:
   - dev/s3.yaml
   - dev/rds.yaml
 
+{% set image_tag = "!ssm " ~ stack_group_config.sceptre_user_data.ssm_path ~ "/images/tag" %}
 parameters:
   Env: "{{ var.env }}"
   VpcId: !stack_attr sceptre_user_data.vpc_id
   # Workers launch into the public subnet (they need public IPs to download external data).
   WorkerSubnetId: !stack_attr sceptre_user_data.public_subnet
   JobsSecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
-  # A new digest changes the task definitions and rolls the services on launch.
-  AirflowImage: !ssm {{ stack_group_config.sceptre_user_data.ssm_path }}/images/airflow
+  # The promoted image tag (see make promote), resolved to a digest-pinned URI at deploy
+  # time. A new digest changes the task definitions and rolls the services on launch.
+  ImageTag: {{ image_tag }}
+  AirflowImage: !ecr_image
+    repository: comet-{{ var.env }}-airflow
+    tag: {{ image_tag }}
   DagsBucketName: !stack_output dev/s3.yaml::AirflowDagsBucketName
   DagsBucketArn: !stack_output dev/s3.yaml::AirflowDagsBucketARN
   LogsBucketName: !stack_output dev/s3.yaml::AirflowLogsBucketName

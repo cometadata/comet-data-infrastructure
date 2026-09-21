@@ -230,6 +230,8 @@ Resources:
                   - 'cloudformation:List*'
                   - 'codeconnections:GetConnection'
                   - 'codeconnections:GetConnectionToken'
+                  - 'ecr:DescribeImages'
+                  - 'ecr:DescribeRepositories'
                   - 'ecs:DescribeTasks'
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
@@ -239,6 +241,7 @@ Resources:
                   - 'ssm:GetParameter*'
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/comet-${Env}-*/*'
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/comet-${Env}-*'
                   - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/comet-${Env}-airflow*/*'
                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/codebuild/deploy:*'
                   - !Sub 'arn:${AWS::Partition}:s3:::${TemplateBucketName}'

@@ -164,6 +164,7 @@ def create_publish_enrichments_dag(dag_id: str, params: PublishEnrichmentsParams
                 ],
             },
             submit_job_timeout=BATCH_ATTEMPT_TIMEOUT,
+            awslogs_enabled=True,
             deferrable=True,
         )
 

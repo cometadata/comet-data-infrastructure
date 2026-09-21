@@ -58,7 +58,7 @@ class TestTagging:
 
         assert not manually_tagged
 
-    def test_ecr_retention_only_expires_sha_and_untagged_images(self, rendered_templates):
+    def test_ecr_retention_only_expires_sha_local_and_untagged_images(self, rendered_templates):
         resources = rendered_templates["ecr.j2"]["Resources"]
 
         for logical_id in ("BatchRepository", "MarpleRepository", "AirflowRepository"):
@@ -70,6 +70,12 @@ class TestTagging:
                     "tagPrefixList": ["sha-"],
                     "countType": "imageCountMoreThan",
                     "countNumber": 50,
+                },
+                {
+                    "tagStatus": "tagged",
+                    "tagPrefixList": ["local-"],
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 10,
                 },
                 {
                     "tagStatus": "untagged",
