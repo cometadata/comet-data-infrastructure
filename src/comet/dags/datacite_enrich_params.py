@@ -26,14 +26,14 @@ class DataCiteEnrichParams(BaseDagParams):
         source_id: DOI name of the enrichment project, such as ``10.1234/example``; written to every
             record's ``sourceId``.
         datacite_dag_id: Upstream DataCite ingest DAG id whose run_id keys the input S3 prefix.
-        release_date: Manual runs only — which DataCite release (YYYY-MM-DD) to enrich; empty uses the
+        datacite_release_date: Manual runs only — which DataCite release (YYYY-MM-DD) to enrich; empty uses the
             latest DataCite release, ignored on asset-triggered runs.
     """
 
     bucket_name: str
     source_id: str
     datacite_dag_id: str = "datacite_ingest"
-    release_date: str | None = None
+    datacite_release_date: str | None = None
 
     @field_validator("source_id")
     @classmethod
@@ -94,14 +94,23 @@ def enrich_trigger_params(params: DataCiteEnrichParams) -> dict[str, Param]:
             title="DataCite ingest DAG ID",
             description="Upstream DataCite ingest DAG whose run keys the input S3 prefix.",
         ),
-        "release_date": Param(
-            params.release_date,
+        "datacite_release_date": Param(
+            params.datacite_release_date,
             type=["null", "string"],
             format="date",
             title="DataCite release date",
             description=(
                 "Which release to enrich on a manual run (YYYY-MM-DD). Empty = latest DataCite release. "
                 "Ignored on asset-triggered runs."
+            ),
+        ),
+        "replace_published": Param(
+            False,
+            type="boolean",
+            title="Replace a published release",
+            description=(
+                "Re-run a release date that is already published. The record is un-published and "
+                "the publish DAG overwrites the release on the Hugging Face bucket."
             ),
         ),
     }

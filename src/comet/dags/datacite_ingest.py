@@ -10,11 +10,7 @@ import pendulum
 from comet.airflow import BaseDagParams
 from comet.airflow.assets import DATACITE_RELEASE_ASSET
 from comet.airflow.notifications import alert_kwargs, optional_slack_date, slack_notifier
-from comet.airflow.utils import (
-    build_release_asset_metadata,
-    get_airflow_connection,
-    get_current_run_id,
-)
+from comet.airflow.utils import get_airflow_connection
 from comet.aws import (
     BATCH_JOB_TAGS,
     batch_job_definition_name,
@@ -24,9 +20,9 @@ from comet.aws import (
     s3_uri,
 )
 from comet.constants import DATACITE_SOURCE
+from comet.dags.tasks import persist_release, publish_release_asset
 from comet.datacite.datacite import get_new_datacite_release, release_is_smaller, snapshot_stats
 import comet.dynamodb_store as dataset_releases
-from comet.model.dataset_version_model import DatasetRelease
 from comet.utils import get_env
 
 DOWNLOAD_VCPU = "4"
@@ -145,19 +141,9 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
             deferrable=True,
         )
 
-        @task
-        def persist_discovered_release(release: dict):
-            release = DatasetRelease.from_dict(release)
-            run_id = get_current_run_id()
-            dataset_releases.persist_discovered_release(
-                dataset=DATACITE_SOURCE.identifier,
-                release=release,
-                run_id=run_id,
-                source_prefix=run_prefix(dag_id, run_id),
-            )
-
-        @task(
-            outlets=[DATACITE_RELEASE_ASSET],
+        publish = publish_release_asset(
+            asset=DATACITE_RELEASE_ASSET,
+            dataset=DATACITE_SOURCE.identifier,
             on_success_callback=slack_notifier(
                 ":large_green_circle:",
                 "DataCite release ingested",
@@ -168,15 +154,9 @@ def create_datacite_ingest_dag(dag_id: str, params: DataCiteIngestParams) -> DAG
                 f"*Completed:* {optional_slack_date('ti.end_date')}",
             ),
         )
-        def publish_release_asset(release: dict):
-            release = DatasetRelease.from_dict(release)
-            yield build_release_asset_metadata(
-                asset=DATACITE_RELEASE_ASSET,
-                dataset=DATACITE_SOURCE.identifier,
-                release_date=release.release_date,
-            )
 
-        release_task = fetch_release()
-        release_task >> download >> persist_discovered_release(release_task) >> publish_release_asset(release_task)
+        release = fetch_release()
+        persisted = persist_release(release, dataset=DATACITE_SOURCE.identifier, dag_id=dag_id)
+        release >> download >> persisted >> publish(release)
 
     return datacite_dag()

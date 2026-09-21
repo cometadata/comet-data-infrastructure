@@ -42,8 +42,10 @@ class TestPublishCommand:
                     "datacite",
                     "--release-date",
                     "2026-01-02",
-                    "--source-uris",
-                    '{"datacite-funders": "s3://my-bucket/datacite_enrich_funders/run-1/"}',
+                    "--datasets",
+                    '["datacite-funders"]',
+                    "--data-bucket",
+                    "my-bucket",
                     "--hf-bucket",
                     "my-hf-bucket",
                     "--hf-endpoint-url",
@@ -55,9 +57,36 @@ class TestPublishCommand:
         mock_publish.assert_called_once_with(
             source="datacite",
             release_date="2026-01-02",
-            source_uris={"datacite-funders": "s3://my-bucket/datacite_enrich_funders/run-1/"},
+            datasets=["datacite-funders"],
+            data_bucket="my-bucket",
             hf_bucket="my-hf-bucket",
             endpoint_url="https://s3.example.com",
+        )
+
+
+class TestDiffCommand:
+    def test_invokes_diff_enrichments_with_parsed_args(self, mocker):
+        mock_diff = mocker.patch("comet.diff.diff_enrichments")
+        mocker.patch("comet.cli.setup_logging")
+
+        with pytest.raises(SystemExit) as exc_info:
+            app(
+                [
+                    "diff",
+                    "--old-uri",
+                    "s3://my-bucket/datacite_enrich_funders/run-1/full/",
+                    "--new-uri",
+                    "s3://my-bucket/datacite_enrich_funders/run-2/full/",
+                    "--output-uri",
+                    "s3://my-bucket/datacite_enrich_funders/run-2/diff/",
+                ]
+            )
+        assert exc_info.value.code == 0
+
+        mock_diff.assert_called_once_with(
+            old_uri="s3://my-bucket/datacite_enrich_funders/run-1/full/",
+            new_uri="s3://my-bucket/datacite_enrich_funders/run-2/full/",
+            output_uri="s3://my-bucket/datacite_enrich_funders/run-2/diff/",
         )
 
 

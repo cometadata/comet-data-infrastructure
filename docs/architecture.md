@@ -10,7 +10,13 @@ Everything is defined in CloudFormation and deployed with [Sceptre](https://docs
 
 Two ingest DAGs run daily. Each checks the upstream source for a release newer than the last one recorded in the `comet-<env>-dataset-releases` DynamoDB table, downloads it to `s3://<data-bucket>/{dag_id}/{run_id}/`, records the release, and publishes an Airflow Asset. The three DataCite enrichment DAGs are scheduled on the DataCite asset, so they run whenever a new DataCite snapshot is ingested.
 
-Publishing DAGs run after their enrichment assets are updated. When the selected enrichments have the same release date, the DAG copies them to a Hugging Face S3-compatible bucket, records them as published, and uploads the release index. See [enrichment-data.md](enrichment-data.md) for how to access the published files.
+Each enrichment DAG writes a full release to `s3://<data-bucket>/{dag_id}/{run_id}/full/` and a diff against the latest usable earlier published release to `{dag_id}/{run_id}/diff/`. When no suitable earlier release exists, only the full release is produced. Enrichment or diff failures prevent the run from being recorded and published.
+
+Release records track these locations and the diff's baseline. Publishing checks that the baseline is still the newest published release. Pruning removes the full and diff outputs together.
+
+A published release can be replaced using the `replace_published` trigger parameter. The new run is marked for publication and overwrites the existing export folders. See [Re-running a published release](setup.md#re-running-a-published-release).
+
+Publishing DAGs run after their enrichment assets are updated. When the selected enrichments have the same release date, the DAG copies their `full/` and any `diff/` directories to a Hugging Face S3-compatible bucket, records them as published, and uploads the release index. See [enrichment-data.md](enrichment-data.md) for how to access the published files.
 
 The `prune_releases` DAG runs monthly. It retains the configured number of source and published enrichment releases. Unpublished enrichment outputs remain until a newer publication supersedes them.
 
@@ -51,7 +57,7 @@ The deployment also relies on several supporting AWS services:
 * Secrets Manager stores the Fernet key, database credentials, admin password, the JWT secret for the Task Execution API, and the API server session signing key.
 * CloudWatch stores container logs.
 
-Inbound traffic from the internet is blocked; the UI is accessed by port-forwarding into the api-server task with ECS Exec (see [setup.md](setup.md)).
+Inbound traffic from the internet is blocked; the UI is accessed by port-forwarding into the api-server task with `scripts/airflow-ui.sh` (see [Open the Airflow UI](setup.md#open-the-airflow-ui)).
 
 ## AWS Batch
 

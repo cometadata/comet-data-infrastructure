@@ -46,8 +46,6 @@ import comet.dags.publish_enrichments as publish_enrichments
 from comet.dags.publish_enrichments import PublishEnrichmentsParams, create_publish_enrichments_dag
 from comet.dags.ror_ingest import RorIngestParams, create_ror_ingest_dag
 from comet.dags.slack_alert_test import create_slack_alert_test_dag
-import comet.dynamodb_store as dataset_releases
-from comet.model.dataset_version_model import DatasetRelease
 
 REPO_ROOT = Path(comet.__file__).parents[2]
 EXAMPLE_CONFIG = REPO_ROOT / "dags" / "dags.yaml.example"
@@ -105,9 +103,9 @@ DAG_CASES = [
         RorIngestParams(start_date=START_DATE, bucket_name="test-bucket"),
         "@daily",
         {
-            "fetch_release": {"download", "persist_discovered_release", "publish_release_asset"},
-            "download": {"persist_discovered_release"},
-            "persist_discovered_release": {"publish_release_asset"},
+            "fetch_release": {"download", "persist_release", "publish_release_asset"},
+            "download": {"persist_release"},
+            "persist_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
         success_task="publish_release_asset",
@@ -123,9 +121,9 @@ DAG_CASES = [
         ),
         "@daily",
         {
-            "fetch_release": {"download", "persist_discovered_release", "publish_release_asset"},
-            "download": {"persist_discovered_release"},
-            "persist_discovered_release": {"publish_release_asset"},
+            "fetch_release": {"download", "persist_release", "publish_release_asset"},
+            "download": {"persist_release"},
+            "persist_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
         success_task="publish_release_asset",
@@ -136,8 +134,17 @@ DAG_CASES = [
         DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         [DATACITE_RELEASE_ASSET],
         {
-            "fetch_datacite_release": {"enrich", "persist_release", "publish_release_asset"},
-            "enrich": {"persist_release"},
+            "fetch_datacite_release": {
+                "check_enrichment_unpublished",
+                "enrich",
+                "resolve_previous_release",
+                "persist_release",
+                "publish_release_asset",
+            },
+            "check_enrichment_unpublished": {"enrich", "resolve_previous_release"},
+            "enrich": {"diff", "persist_release"},
+            "resolve_previous_release": {"diff", "persist_release"},
+            "diff": {"persist_release"},
             "persist_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
@@ -148,9 +155,18 @@ DAG_CASES = [
         DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         [DATACITE_RELEASE_ASSET],
         {
-            "fetch_datacite_release": {"enrich", "persist_release", "publish_release_asset"},
+            "fetch_datacite_release": {
+                "check_enrichment_unpublished",
+                "enrich",
+                "resolve_previous_release",
+                "persist_release",
+                "publish_release_asset",
+            },
             "fetch_ror_release": {"enrich"},
-            "enrich": {"persist_release"},
+            "check_enrichment_unpublished": {"enrich", "resolve_previous_release"},
+            "enrich": {"diff", "persist_release"},
+            "resolve_previous_release": {"diff", "persist_release"},
+            "diff": {"persist_release"},
             "persist_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
@@ -192,9 +208,18 @@ DAG_CASES = [
         DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         [DATACITE_RELEASE_ASSET],
         {
-            "fetch_datacite_release": {"enrich", "persist_release", "publish_release_asset"},
+            "fetch_datacite_release": {
+                "check_enrichment_unpublished",
+                "enrich",
+                "resolve_previous_release",
+                "persist_release",
+                "publish_release_asset",
+            },
             "fetch_ror_release": {"enrich"},
-            "enrich": {"persist_release"},
+            "check_enrichment_unpublished": {"enrich", "resolve_previous_release"},
+            "enrich": {"diff", "persist_release"},
+            "resolve_previous_release": {"diff", "persist_release"},
+            "diff": {"persist_release"},
             "persist_release": {"publish_release_asset"},
             "publish_release_asset": set(),
         },
@@ -217,7 +242,6 @@ class EnrichCase(NamedTuple):
     factory: Callable
     params: BaseDagParams
     dataset: str
-    uses_ror: bool
 
 
 ENRICH_CASES = [
@@ -225,23 +249,18 @@ ENRICH_CASES = [
         create_datacite_enrich_funders_dag,
         DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         "datacite-funders",
-        uses_ror=True,
     ),
     EnrichCase(
         create_datacite_enrich_affiliations_dag,
         DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         "datacite-affiliations",
-        uses_ror=True,
     ),
     EnrichCase(
         create_datacite_enrich_resource_type_general_dag,
         DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
         "datacite-resource-type-general",
-        uses_ror=False,
     ),
 ]
-
-ROR_CASES = [case for case in ENRICH_CASES if case.uses_ror]
 
 
 class TestDags:
@@ -289,10 +308,7 @@ class TestDags:
                 "publish",
                 {"hf_bucket_name": "hf-bucket"},
                 "resolve_releases",
-                {
-                    "release_date": "2026-08-01",
-                    "source_uris": {"datacite-funders": "s3://b/x/", "datacite-affiliations": "s3://b/y/"},
-                },
+                {"release_date": "2026-08-01", "datasets": ["datacite-affiliations", "datacite-funders"]},
                 "Enrichments published to Hugging Face",
                 "*Release date:* 2026-08-01\n*Datasets:* datacite-affiliations, datacite-funders\n*Bucket:* hf-bucket\n",
             ),
@@ -410,6 +426,7 @@ class TestPublishEnrichmentsDag:
                 run_id=f"run-{dataset}",
                 release_date=latest[dataset],
                 source_prefix=f"enrich_{dataset}/run-{dataset}/",
+                full_source_prefix=f"enrich_{dataset}/run-{dataset}/full/",
             ),
         )
 
@@ -421,7 +438,7 @@ class TestPublishEnrichmentsDag:
             return_value={"params": {"release_date": release_date, "datasets": datasets}},
         )
 
-    def test_publishes_record_source_uris_when_latest_releases_align(self, dag, mocker):
+    def test_publishes_datasets_when_latest_releases_align(self, dag, mocker):
         latest = {
             "datacite-funders": "2026-01-02",
             "datacite-affiliations": "2026-01-02",
@@ -432,10 +449,7 @@ class TestPublishEnrichmentsDag:
 
         resolved = dag.get_task("resolve_releases").python_callable()
 
-        assert resolved == {
-            "release_date": "2026-01-02",
-            "source_uris": {dataset: f"s3://test-bucket/enrich_{dataset}/run-{dataset}/" for dataset in latest},
-        }
+        assert resolved == {"release_date": "2026-01-02", "datasets": sorted(latest)}
 
     @pytest.mark.parametrize(
         ("asset_triggered", "expected"),
@@ -464,61 +478,51 @@ class TestPublishEnrichmentsDag:
 
         resolved = dag.get_task("resolve_releases").python_callable()
 
-        assert resolved["source_uris"] == {
-            "datacite-funders": "s3://test-bucket/enrich_datacite-funders/run-datacite-funders/",
-        }
+        assert resolved["datasets"] == ["datacite-funders"]
 
-    def test_fails_even_when_asset_triggered_if_record_has_no_source_prefix(self, dag, mocker):
+    def test_fails_even_when_asset_triggered_if_record_has_no_full_source_prefix(self, dag, mocker):
         mocker.patch.object(
             publish_enrichments,
             "resolve_release_record",
             side_effect=lambda *, dataset, release_date: SimpleNamespace(
-                run_id=f"run-{dataset}", release_date="2026-01-02", source_prefix=None
+                run_id=f"run-{dataset}", release_date="2026-01-02", full_source_prefix=None
             ),
         )
         self.patch_context(mocker, datasets=["datacite-funders"])
         mocker.patch("comet.airflow.utils.is_asset_triggered", return_value=True)
 
-        with pytest.raises(AirflowException, match="no source_prefix") as excinfo:
+        with pytest.raises(AirflowException, match="no full_source_prefix") as excinfo:
             dag.get_task("resolve_releases").python_callable()
         assert type(excinfo.value) is AirflowException
 
     def test_batch_command_invokes_generic_publish_cli(self, dag):
         command = dag.get_task("publish").container_overrides["command"]
         assert command[:4] == ["comet", "publish", "--source", "datacite"]
-
-
-class TestEnrichFetchRorRelease:
-    @pytest.mark.parametrize("case", ROR_CASES, ids=lambda c: c.dataset)
-    def test_resolved_ror_release_includes_its_date_and_uri(self, case, mocker):
-        dag = case.factory("enrich_test", case.params)
-        module = inspect.getmodule(case.factory)
-        mocker.patch.object(
-            module,
-            "get_current_context",
-            return_value={"params": {"ror_dag_id": "ror_ingest", "ror_release_date": None}},
-        )
-        record = SimpleNamespace(release_date="2026-02-03", run_id="ror-run", file_name="ror.zip")
-        mock_resolve = mocker.patch.object(module, "resolve_release_record", return_value=record)
-
-        resolved = dag.get_task("fetch_ror_release").python_callable()
-
-        mock_resolve.assert_called_once_with(dataset="ror", release_date=None)
-        assert resolved == {"release_date": "2026-02-03", "uri": "s3://test-bucket/ror_ingest/ror-run/ror.zip"}
+        assert command[command.index("--data-bucket") + 1] == "test-bucket"
 
 
 class TestEnrichBatchCommand:
-    @pytest.mark.parametrize("case", ENRICH_CASES, ids=lambda c: c.dataset)
-    def test_passes_source_id_from_params(self, case):
-        dag = case.factory("enrich_test", case.params)
+    @staticmethod
+    def enrich_command(dag) -> list[str]:
         enrich = dag.get_task("enrich")
         if enrich.ecs_properties_override:
             containers = enrich.ecs_properties_override["taskProperties"][0]["containers"]
-            command = next(c for c in containers if c["name"] == "main")["command"]
-        else:
-            command = enrich.container_overrides["command"]
+            return next(c for c in containers if c["name"] == "main")["command"]
+        return enrich.container_overrides["command"]
+
+    @pytest.mark.parametrize("case", ENRICH_CASES, ids=lambda c: c.dataset)
+    def test_passes_source_id_from_params(self, case):
+        dag = case.factory("enrich_test", case.params)
+        command = self.enrich_command(dag)
 
         assert command[command.index("--source-id") + 1] == "{{ params.source_id }}"
+
+    @pytest.mark.parametrize("case", ENRICH_CASES, ids=lambda c: c.dataset)
+    def test_writes_the_full_release_under_the_run_prefix(self, case):
+        dag = case.factory("enrich_test", case.params)
+        command = self.enrich_command(dag)
+
+        assert command[command.index("--output-uri") + 1] == "s3://test-bucket/enrich_test/{{ run_id }}/full/"
 
 
 class TestPruneReleasesDag:
@@ -630,61 +634,3 @@ class TestPruneReleasesDag:
             dag.get_task("prune").python_callable()
 
         mocks.delete.assert_not_called()
-
-
-class TestPersistRelease:
-    PERSIST_CASES = [
-        (
-            create_ror_ingest_dag,
-            RorIngestParams(start_date=START_DATE, bucket_name="test-bucket"),
-            "ror",
-            "persist_discovered_release",
-        ),
-        (
-            create_datacite_ingest_dag,
-            DataCiteIngestParams(
-                start_date=START_DATE,
-                bucket_name="test-bucket",
-                datacite_bucket_name="test-datacite-bucket",
-                datacite_bucket_region="eu-west-1",
-            ),
-            "datacite",
-            "persist_discovered_release",
-        ),
-        (
-            create_datacite_enrich_funders_dag,
-            DataCiteEnrichFundersParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
-            "datacite-funders",
-            "persist_release",
-        ),
-        (
-            create_datacite_enrich_affiliations_dag,
-            DataCiteEnrichAffiliationsParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
-            "datacite-affiliations",
-            "persist_release",
-        ),
-        (
-            create_datacite_enrich_resource_type_general_dag,
-            DataCiteEnrichParams(start_date=START_DATE, bucket_name="test-bucket", source_id=SOURCE_ID),
-            "datacite-resource-type-general",
-            "persist_release",
-        ),
-    ]
-
-    @pytest.mark.parametrize(
-        ("factory", "params", "dataset", "task_id"), PERSIST_CASES, ids=[case[2] for case in PERSIST_CASES]
-    )
-    def test_persist_release_stores_the_run_output_prefix(self, factory, params, dataset, task_id, mocker):
-        dag = factory("prefix_test", params)
-        mock_persist = mocker.patch.object(dataset_releases, "persist_discovered_release")
-        mocker.patch.object(inspect.getmodule(factory), "get_current_run_id", return_value="run-1")
-        release = DatasetRelease(release_date=datetime.date(2026, 1, 2))
-
-        dag.get_task(task_id).python_callable(release.to_dict())
-
-        mock_persist.assert_called_once_with(
-            dataset=dataset,
-            release=release,
-            run_id="run-1",
-            source_prefix="prefix_test/run-1/",
-        )
