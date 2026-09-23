@@ -2,6 +2,9 @@ template:
   path: build-pipeline.j2
   type: file
 
+stack_tags:
+  Subservice: build
+
 dependencies:
   - dev/monitoring/alerts.yaml
   - dev/ecr.yaml

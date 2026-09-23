@@ -2,6 +2,9 @@ template:
   path: airflow-services.j2
   type: file
 
+stack_tags:
+  Subservice: platform
+
 dependencies:
   - dev/airflow.yaml
   - dev/security-groups.yaml

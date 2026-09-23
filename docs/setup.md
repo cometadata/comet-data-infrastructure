@@ -49,7 +49,7 @@ No manual `docker login` is needed. See the [helper's configuration instructions
 
 COMET uses a shared VPC, public subnet, and route table created outside this repository. You also need an S3 bucket for CloudFormation templates and a GitHub connection in **Developer Tools → Settings → Connections**. Create and authorize the connection, and confirm that its status is **Available**. Record the stack outputs, bucket name, connection ARN, and GitHub repository ID in `vars-dev.yaml` during the [first deployment](#first-deployment).
 
-Create the [DataCite credentials](#datacite-credentials), [Hugging Face publish credentials](#hugging-face-publish-credentials), [Airflow Fernet key](#rotating-the-fernet-key), and [Slack webhook](#configure-slack-alerts) in Secrets Manager before deploying. Use the default `aws/secretsmanager` encryption key for all four. The COMET roles do not have permission to decrypt customer-managed KMS keys.
+The four Secrets Manager secrets that CloudFormation does not manage are created with `make secrets` during the [first deployment](#first-deployment).
 
 Enable resource tags for telemetry in the COMET AWS account before deploying the monitoring stacks. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
 
@@ -71,34 +71,41 @@ CloudFormation assigns names to the roles and policies. Their IAM paths remain u
    cp vars-dev.yaml.example vars-dev.yaml
    ```
 
-2. Fill in the environment settings and every placeholder except the three bootstrap outputs. This includes the template bucket, SSM prefix, shared network stack outputs, alert addresses, GitHub connection, repository, and secret ARNs. Leave `permissions_boundary_arn`, `cloudformation_service_role_arn`, and `deployment_runner_role_arn` empty for now. `Environment` and `Service` are added to the stack tags by Sceptre.
-3. Using credentials that can create IAM roles and managed policies, create the deployment permissions:
+2. Fill in the environment settings and every placeholder except the three bootstrap outputs. This includes the template bucket, SSM prefix, shared network stack outputs, alert addresses, GitHub connection, and repository. Leave `permissions_boundary_arn`, `cloudformation_service_role_arn`, and `deployment_runner_role_arn` empty for now. `Environment` and `Service` are added to the stack tags by Sceptre.
+3. Create the four secrets that CloudFormation does not manage: the [DataCite credentials](#datacite-credentials), [Hugging Face publish credentials](#hugging-face-publish-credentials), [Airflow Fernet key](#rotating-the-fernet-key), and [Slack webhook](#configure-slack-alerts):
+
+   ```bash
+   make secrets
+   ```
+
+   The command creates each secret without a value, tags it with the stack tags from `vars-dev.yaml`, and prints its ARN. Copy the ARNs into `vars-dev.yaml`, then set each secret's value in the Secrets Manager console as described in the linked sections. The command never writes secret values. If a secret already exists, it only updates the secret's tags.
+4. Using credentials that can create IAM roles and managed policies, create the deployment permissions:
 
    ```bash
    make bootstrap
    ```
 
-4. Copy the stack outputs into `vars-dev.yaml`:
+5. Copy the stack outputs into `vars-dev.yaml`:
 
    * `BoundaryArn` → `permissions_boundary_arn`
    * `ServiceRoleArn` → `cloudformation_service_role_arn`
    * `RunnerRoleArn` → `deployment_runner_role_arn`
 
-5. Store the completed variables file in Parameter Store for the deploy project:
+6. Store the completed variables file in Parameter Store for the deploy project:
 
    ```bash
    make sync-vars
    ```
 
-6. Deploy the image-build pipeline and deploy project. Sceptre also launches the ECR, S3, and monitoring alert stacks required by the build pipeline:
+7. Deploy the image-build pipeline and deploy project. Sceptre also launches the ECR, S3, and monitoring alert stacks required by the build pipeline:
 
    ```bash
    make launch STACK=build-pipeline.yaml
    make launch STACK=deploy.yaml
    ```
 
-7. Push a commit to `main`, or start the main image-build pipeline in CodePipeline, to build the first image set. When the build finishes, select its `sha-*` tag with `make promote SOURCE_TAG=<tag>`.
-8. Preview and deploy the remaining stacks:
+8. Push a commit to `main`, or start the main image-build pipeline in CodePipeline, to build the first image set. When the build finishes, select its `sha-*` tag with `make promote SOURCE_TAG=<tag>`.
+9. Preview and deploy the remaining stacks:
 
    ```bash
    make diff
@@ -205,20 +212,16 @@ Create a Slack channel for the alerts:
 4. Select **Add New Webhook to Workspace**, choose the alert channel, and authorize it.
 5. Copy the generated `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` URL.
 
-Then store the webhook as a Secrets Manager secret. The Airflow workers read the `slack_default`
-connection from this secret. Every Slack message is sent from a worker, and deadline callbacks run
-with a restricted Execution API token that cannot read connections from the metadata database, so
-the connection must resolve from the environment instead.
+Then store the webhook in the `comet-dev-airflow-slack-webhook` secret created by `make secrets`. The
+Airflow workers read the `slack_default` connection from this secret. Every Slack message is sent
+from a worker, and deadline callbacks run with a restricted Execution API token that cannot read
+connections from the metadata database, so the connection must resolve from the environment instead.
 
-1. Open Secrets Manager in the AWS console and select **Store a new secret → Other type of secret**.
-2. On the **Plaintext** tab, enter the connection as JSON:
+In the Secrets Manager console, set the secret's value on the **Plaintext** tab to the connection as JSON:
 
-   ```json
-   {"conn_type": "slackwebhook", "password": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"}
-   ```
-
-3. Name the secret, for example `comet-dev-airflow-slack-webhook`, and finish creating it.
-4. Copy the secret ARN to `slack_webhook_secret_arn` in `vars-dev.yaml`.
+```json
+{"conn_type": "slackwebhook", "password": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"}
+```
 
 #### Test Slack alerts
 
@@ -234,14 +237,11 @@ Set `source_id` on each enrichment DAG's entry in `dags.yaml` to the enrichment 
 
 Configure the DataCite account ID and password in Secrets Manager for the `download-datacite` Batch job and in the `datacite` Airflow connection. Update both when rotating the credentials.
 
-Create the Batch secret:
+For the Batch job, set the value of the `comet-dev-batch-datacite-credentials` secret created by `make secrets` in the Secrets Manager console:
 
-```bash
-aws secretsmanager create-secret --name comet-dev-batch-datacite-credentials \
-  --secret-string '{"account_id":"<id>","password":"<password>"}'
+```json
+{"account_id":"<id>","password":"<password>"}
 ```
-
-Copy the returned ARN to `datacite_credentials_secret_arn` in `vars-dev.yaml`.
 
 For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui)), go to Admin → Connections, and add a connection with these fields:
 
@@ -256,14 +256,11 @@ Create the connection before running `datacite_ingest`; `fetch_release` fails if
 
 The `publish` Batch job uploads enrichment releases to a Hugging Face S3-compatible bucket and reads its credentials from Secrets Manager.
 
-Create the publish secret:
+Set the value of the `comet-dev-batch-hf-credentials` secret created by `make secrets` in the Secrets Manager console:
 
-```bash
-aws secretsmanager create-secret --name comet-dev-batch-hf-credentials \
-  --secret-string '{"access_key_id":"<key-id>","secret_access_key":"<secret-key>"}'
+```json
+{"access_key_id":"<key-id>","secret_access_key":"<secret-key>"}
 ```
-
-Copy the returned ARN to `hf_credentials_secret_arn` in `vars-dev.yaml`.
 
 The Hugging Face bucket name and endpoint URL are set on the `datacite_publish` entry in `dags.yaml`.
 
@@ -345,7 +342,7 @@ Generate a key with:
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-One-time setup: create the secret in the Secrets Manager console with a generated key as its value and the description `Airflow Fernet key that encrypts connections and variables stored in the metadata DB (AIRFLOW__CORE__FERNET_KEY)`. Leave encryption on the default `aws/secretsmanager` key, then put its ARN into `vars-dev.yaml` as `fernet_secret_arn`.
+One-time setup: set the value of the secret created by `make secrets` to a generated key in the Secrets Manager console.
 
 To rotate, in the Secrets Manager console:
 

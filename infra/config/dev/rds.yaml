@@ -2,6 +2,9 @@ template:
   path: rds.j2
   type: file
 
+stack_tags:
+  Subservice: platform
+
 dependencies:
   - dev/security-groups.yaml
   - dev/network.yaml

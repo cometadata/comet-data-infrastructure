@@ -3,3 +3,5 @@ project_code: comet
 
 # Environment and Service are injected because the bootstrap IAM policies require these exact values.
 stack_tags: {{ dict(var.stack_tags, Environment=var.env, Service='comet') | tojson }}
+# Stacks add Subservice on top of these tags instead of replacing them.
+stack_tags_inheritance: merge
