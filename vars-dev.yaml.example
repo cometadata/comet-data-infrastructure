@@ -25,11 +25,15 @@ stack_tags:
 # Budget and alarm thresholds.
 monthly_budget_usd: 150
 egress_budget_gb: 500
+config_budget_usd: 10
+cloudwatch_budget_usd: 10
+region_budget_usd: 200
 log_ingestion_threshold_mib_per_5_minutes: 10
 s3_total_storage_threshold_gib: 1000
 compute_age_hours_threshold: 16
 ec2_launches_per_10_minutes_threshold: 5
 fargate_worker_launches_per_10_minutes_threshold: 15
+config_items_per_hour_threshold: 500
 
 # Required and non-empty. Every address receives SNS monitoring notifications
 # and budget alerts.
