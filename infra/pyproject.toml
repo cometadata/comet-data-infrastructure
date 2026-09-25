@@ -3,9 +3,18 @@ name = "comet-infra"
 version = "0.0.0"
 requires-python = "==3.12.*"
 dependencies = [
+    "comet-resolvers",
     "sceptre>=4,<5",
     "sceptre-ssm-resolver>=1,<2",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+]
+
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+comet-resolvers = { path = "resolvers", editable = true }

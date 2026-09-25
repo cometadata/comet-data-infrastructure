@@ -5,8 +5,9 @@ region: us-east-1
 template_bucket: your-comet-dev-cloudformation
 codebuild_image: aws/codebuild/amazonlinux-x86_64-standard:6.0
 
-# SSM Parameter Store path prefix for image digest parameters
-# ({ssm_prefix}/{env}/images/...) and the vars-dev.yaml copy the deploy project reads.
+# SSM Parameter Store path prefix for deployment parameters. Holds the promoted image tag
+# ({ssm_prefix}/{env}/images/tag) and the vars-dev.yaml copy the deploy project reads;
+# the deploy role can only read parameters under it.
 ssm_prefix: /your-org/comet
 
 # CodeConnections connection to GitHub (Developer Tools console -> Settings -> Connections),

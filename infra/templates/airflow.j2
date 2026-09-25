@@ -94,7 +94,11 @@ Parameters:
   JobsSecurityGroupId:
     Type: String
 
-  # ECR image URI pinned by digest.
+  # Promoted ECR tag, for reference; AirflowImage carries the digest resolved from it.
+  ImageTag:
+    Type: String
+
+  # ECR image URI pinned by digest, resolved from ImageTag.
   AirflowImage:
     Type: String
 
@@ -676,6 +680,12 @@ Resources:
               awslogs-stream-prefix: airflow
 
 Outputs:
+  ImageTag:
+    Value: !Ref ImageTag
+
+  AirflowImage:
+    Value: !Ref AirflowImage
+
   EcsClusterName:
     Value: !Ref EcsCluster
 
