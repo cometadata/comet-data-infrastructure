@@ -44,7 +44,7 @@ airflow = [
 comet = "comet.cli:main"
 
 [tool.pytest.ini_options]
-# make test also runs infra/resolvers/tests in the infra environment.
+# make test also runs infra/resolvers/tests and infra/tests in the infra environment.
 testpaths = ["tests", "src"]
 
 [tool.ruff]

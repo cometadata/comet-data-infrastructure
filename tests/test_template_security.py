@@ -4,6 +4,8 @@ import yaml
 
 from conftest import PROJECT_DIR, TaggedValue, resources_of_type
 
+from comet.aws import BATCH_JOB_TAGS
+
 # These roles define and enforce the deployment boundary, so environment stacks cannot manage them.
 UNBOUNDED_ROLES = {
     ("bootstrap/deployment-roles.yaml", "DeploymentRunnerRole"),
@@ -49,6 +51,22 @@ def policy_statements(role, policy_name):
     return policy["PolicyDocument"]["Statement"]
 
 
+class TestWorkerPermissions:
+    def test_workers_can_tag_batch_jobs_with_submission_tags(self, rendered_templates):
+        role = rendered_templates["airflow.j2"]["Resources"]["AirflowWorkerTaskRole"]
+        statements = policy_statements(role, "airflow-batch-submit")
+        tagging = next(s for s in statements if "batch:TagResource" in statement_actions(s))
+
+        assert tagging["Effect"] == "Allow"
+        assert set(tagging["Condition"]["ForAllValues:StringEquals"]["aws:TagKeys"]) == set(BATCH_JOB_TAGS)
+
+        # Every submission tag is pinned to its value, so a DAG cannot mis-tag a job.
+        pinned = tagging["Condition"]["StringEquals"]
+        expected = {f"aws:RequestTag/{key}": value for key, value in BATCH_JOB_TAGS.items()}
+        expected["aws:RequestTag/Environment"] = TaggedValue("Ref", "Env")
+        assert pinned == expected
+
+
 class TestDeploymentPermissions:
     def test_every_environment_role_carries_the_boundary(self, resources):
         missing = [
@@ -63,16 +81,16 @@ class TestDeploymentPermissions:
         statements = policy_statements(service_role, "iam")
 
         escalation_gate = next(
-            s for s in statements if s["Effect"] == "Deny" and "Action" in s and statement_actions(s) == GRANTING_ACTIONS
+            s
+            for s in statements
+            if s["Effect"] == "Deny" and "Action" in s and statement_actions(s) == GRANTING_ACTIONS
         )
         assert escalation_gate["Resource"] == "*"
         assert escalation_gate["Condition"]["StringNotEquals"]["iam:PermissionsBoundary"] == TaggedValue(
             "Ref", "BoundaryArn"
         )
 
-        flat_deny = next(
-            s for s in statements if s["Effect"] == "Deny" and "Action" in s and "Condition" not in s
-        )
+        flat_deny = next(s for s in statements if s["Effect"] == "Deny" and "Action" in s and "Condition" not in s)
         assert {
             "iam:AttachUserPolicy",
             "iam:CreateAccessKey",

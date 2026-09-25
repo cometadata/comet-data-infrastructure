@@ -1,3 +1,6 @@
 template:
   path: monitoring/alerts.j2
   type: file
+
+stack_tags:
+  Subservice: platform

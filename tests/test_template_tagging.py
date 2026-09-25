@@ -1,10 +1,55 @@
 import json
 
-from conftest import resources_of_type, tag_keys
+from conftest import resources_of_type, tag_keys, tag_values
 
 
 class TestTagging:
-    required_scope_tags = {"Environment", "Service"}
+    required_scope_tags = {"Environment", "Service", "Subservice"}
+    subservices = {"platform", "jobs", "build", "dev-instance"}
+    # These stacks mix subservices, so their resources set Subservice individually.
+    per_resource_subservice_stacks = {"dev/airflow.yaml", "dev/s3.yaml"}
+    # CloudFormation exposes no Tags property for these types.
+    untaggable_types = {"AWS::IAM::ManagedPolicy"}
+
+    def test_stacks_set_subservice_only_when_shared_by_all_resources(self, stack_configs):
+        for path, config in stack_configs.items():
+            tags = config.get("stack_tags", {})
+            if path in self.per_resource_subservice_stacks:
+                assert "Subservice" not in tags, path
+            else:
+                assert tags.get("Subservice") in self.subservices, path
+
+    def test_mixed_stack_resources_each_set_one_subservice(self, stack_configs, rendered_templates):
+        problems = []
+
+        for path in self.per_resource_subservice_stacks:
+            template = stack_configs[path]["template"]["path"]
+            for logical_id, resource in rendered_templates[template]["Resources"].items():
+                tags = resource["Properties"].get("Tags")
+                if resource["Type"] in self.untaggable_types:
+                    if tags is not None:
+                        problems.append(f"{template}:{logical_id} sets Tags on an untaggable type")
+                    continue
+                allocation = [tag["Value"] for tag in tags or [] if tag["Key"] == "Subservice"]
+                if len(allocation) != 1 or allocation[0] not in self.subservices:
+                    problems.append(f"{template}:{logical_id} has Subservice {allocation}")
+
+        assert not problems, problems
+
+    def test_single_subservice_stack_templates_match_their_stack_tag(self, stack_configs, rendered_templates):
+        problems = []
+
+        for path, config in stack_configs.items():
+            if path in self.per_resource_subservice_stacks:
+                continue
+            subservice = config["stack_tags"]["Subservice"]
+            template = config["template"]["path"]
+            for logical_id, resource in rendered_templates[template]["Resources"].items():
+                values = set(tag_values(resource["Properties"], "Subservice"))
+                if values - {subservice}:
+                    problems.append(f"{template}:{logical_id} tags Subservice {values} but the stack is {subservice}")
+
+        assert not problems, problems
 
     def test_monitoring_resources_rely_on_inherited_stack_tags(self, resources):
         manually_tagged = [
@@ -16,7 +61,7 @@ class TestTagging:
 
         assert not manually_tagged, f"monitoring resources with manual tags: {manually_tagged}"
 
-    def test_tag_propagation_switches_are_enabled(self, resources):
+    def test_resources_propagate_scope_tags_to_compute(self, resources):
         problems = []
 
         for name, logical_id, resource in resources_of_type(resources, "AWS::EC2::LaunchTemplate"):
@@ -36,6 +81,10 @@ class TestTagging:
             if resource["Properties"].get("PropagateTags") != "SERVICE":
                 problems.append(f"{name}:{logical_id} ECS service does not propagate tags to tasks")
 
+        for name, logical_id, resource in resources_of_type(resources, "AWS::ECS::TaskDefinition"):
+            if not self.required_scope_tags <= tag_keys(resource["Properties"].get("Tags")):
+                problems.append(f"{name}:{logical_id} task definition is missing scope tags")
+
         for name, logical_id, resource in resources_of_type(resources, "AWS::Batch::ComputeEnvironment"):
             tags = resource["Properties"]["ComputeResources"].get("Tags", {})
             if not self.required_scope_tags <= set(tags):
@@ -43,16 +92,12 @@ class TestTagging:
 
         assert not problems, problems
 
-    def test_cloud_map_and_notification_rules_rely_on_inherited_stack_tags(self, resources):
-        inherited_types = {
-            "AWS::CodeStarNotifications::NotificationRule",
-            "AWS::ServiceDiscovery::PrivateDnsNamespace",
-            "AWS::ServiceDiscovery::Service",
-        }
+    def test_notification_rules_rely_on_inherited_stack_tags(self, resources):
         manually_tagged = [
             f"{name}:{logical_id}"
-            for name, logical_id, resource in resources
-            if resource["Type"] in inherited_types
+            for name, logical_id, resource in resources_of_type(
+                resources, "AWS::CodeStarNotifications::NotificationRule"
+            )
             if "Tags" in resource["Properties"]
         ]
 

@@ -131,6 +131,17 @@ The permissions boundary is attached to every IAM role created by the environmen
 * Track monthly AWS Config and CloudWatch spend in the deployment region, alerting at 50%, 75%, and 100% of actual spend and 100% of forecast spend.
 * Track all monthly spend in the deployment region, alerting at 100% of actual spend and 100% of forecast spend.
 
+### Cost allocation
+
+`Subservice` groups COMET costs into:
+
+* `platform`: Airflow services and supporting infrastructure, including service logs.
+* `jobs`: Fargate workers, Batch compute, job data, and Airflow task logs.
+* `build`: image builds, deployment, container repositories, and build artifacts.
+* `dev-instance`: the development EC2 instance.
+
+Endpoint data processing counts toward `platform`, including traffic caused by jobs. Some charges have no `Subservice` allocation.
+
 ### Notifications
 
 Monitoring notifications are delivered to every address in the `alert_emails` list in `vars-dev.yaml`; at least one address is required. CloudWatch alarms, RDS events, and AWS Budgets publish to the monitoring SNS topic, which forwards notifications to those addresses.

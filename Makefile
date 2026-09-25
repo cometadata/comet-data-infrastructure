@@ -20,7 +20,7 @@ help:
 > @echo
 > @echo "Images: build-batch, build-marple, build-airflow, push-batch, push-marple, push-airflow, push-all"
 > @echo "Releases: retag, promote"
-> @echo "Deployment: sync-vars, status, diff, launch, bootstrap, delete"
+> @echo "Deployment: sync-vars, secrets, status, diff, launch, bootstrap, delete"
 > @echo "Dev instance: dev-up, dev-down, dev-refresh, dev-keepalive, dev-autostop, dev-status"
 > @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, clean"
 > @echo
@@ -117,6 +117,11 @@ promote: check-source-tag
 sync-vars:
 > scripts/sync-vars.sh "$(ENV)"
 
+# Create the secrets kept outside CloudFormation, or tag the ones already set in vars-<env>.yaml.
+secrets:
+> @[[ -f "vars-$(ENV).yaml" ]] || { echo >&2 "vars-$(ENV).yaml does not exist."; exit 1; }
+> uv run --project infra --locked --no-active python scripts/create_secrets.py "$(ENV)"
+
 # Optional STACK targets a single stack, e.g. `make status STACK=ec2.yaml`.
 status:
 > @[[ -d "infra/config/$(ENV)" ]] || { echo >&2 "No Sceptre configuration for ENV=$(ENV)."; exit 1; }
@@ -196,4 +201,4 @@ lint-ci:
 
 test:
 > uv run --locked --extra airflow --extra dev pytest
-> uv run --project infra --locked --no-active pytest infra/resolvers/tests
+> uv run --project infra --locked --no-active pytest infra/resolvers/tests infra/tests

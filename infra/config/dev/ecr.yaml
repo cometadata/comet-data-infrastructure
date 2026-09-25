@@ -2,5 +2,8 @@ template:
   path: ecr.j2
   type: file
 
+stack_tags:
+  Subservice: build
+
 parameters:
   RepositoryName: comet-dev

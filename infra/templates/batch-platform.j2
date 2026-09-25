@@ -35,7 +35,7 @@ Resources:
       TagSpecifications:
         - ResourceType: 'launch-template'
           Tags:
-{% filter indent(12, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
+{% with subservice = 'jobs' %}{% filter indent(12, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       LaunchTemplateData:
         # IMDSv2 only; the hop limit of 1 stops job containers reading the instance role credentials.
         # Jobs get their own credentials from their ECS task roles instead.
@@ -53,7 +53,7 @@ Resources:
 {% for rtype in ['instance', 'volume'] %}
           - ResourceType: '{{ rtype }}'
             Tags:
-{% filter indent(14, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
+{% with subservice = 'jobs' %}{% filter indent(14, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
 {% endfor %}
         UserData:
           Fn::Base64: !Sub |
@@ -150,6 +150,7 @@ Resources:
 {% for key, value in sceptre_user_data.stack_tags.items() %}
           '{{ key }}': '{{ value }}'
 {% endfor %}
+          Subservice: 'jobs'
 
   {{ q.prefix }}JobQueue:
     Type: 'AWS::Batch::JobQueue'
