@@ -8,13 +8,19 @@ dependencies = [
     "sceptre-ssm-resolver>=1,<2",
 ]
 
+# Deploy commands run with --only-group deploy so release builds skip Sceptre.
 [dependency-groups]
+deploy = ["comet-deploy"]
 dev = [
+    {include-group = "deploy"},
+    "moto>=5.2.1",
     "pytest>=8,<10",
 ]
 
 [tool.uv]
 package = false
+default-groups = []
 
 [tool.uv.sources]
+comet-deploy = { path = "deploy", editable = true }
 comet-resolvers = { path = "resolvers", editable = true }

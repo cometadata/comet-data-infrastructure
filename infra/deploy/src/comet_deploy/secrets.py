@@ -1,18 +1,15 @@
 """Create the Secrets Manager secrets that CloudFormation doesn't manage, tagged like the stacks.
 
 A secret that already exists, found by its ARN in vars-<env>.yaml or by name, only has its tags
-updated. New secrets are created without a value. The script never writes secret values; set them
+updated. New secrets are created without a value. The command never writes secret values; set them
 in the console.
-
-Usage: python scripts/create_secrets.py <env>
 """
 
 from dataclasses import dataclass
-from pathlib import Path
-import sys
 
 import boto3
-import yaml
+
+from comet_deploy.settings import load_variables, resource_tags, vars_path
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -25,10 +22,10 @@ class Secret:
     description: str  # Description stored in Secrets Manager when creating the secret.
 
 
-def main(env: str) -> None:
+def create_secrets(env: str) -> None:
     """Create or tag each secret for the environment."""
-    vars_file = f"vars-{env}.yaml"
-    variables = yaml.safe_load(Path(vars_file).read_text())
+    vars_file = vars_path(env)
+    variables = load_variables(env)
     client = boto3.client("secretsmanager", region_name=variables["region"])
 
     secrets = [
@@ -60,14 +57,7 @@ def main(env: str) -> None:
     ]
 
     for secret in secrets:
-        # Same tags that infra/config/config.yaml gives every stack.
-        tags = {
-            **variables["stack_tags"],
-            "Environment": variables["env"],
-            "Service": "comet",
-            "Subservice": secret.subservice,
-        }
-        tag_list = [{"Key": k, "Value": str(v)} for k, v in tags.items()]
+        tag_list = resource_tags(variables, secret.subservice)
 
         # Existing secrets only get their tags updated; their values are never touched.
         arn = variables.get(secret.vars_key)
@@ -84,7 +74,3 @@ def main(env: str) -> None:
             client.tag_resource(SecretId=arn, Tags=tag_list)
             print(f"Tagged {arn}")
         print(f"  Set {secret.vars_key} to this ARN in {vars_file}.")
-
-
-if __name__ == "__main__":
-    main(sys.argv[1])

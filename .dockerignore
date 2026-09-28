@@ -8,3 +8,10 @@
 
 # Sceptre per-environment vars (hold secret ARNs and account-specific paths)
 vars-*.yaml
+
+data
+
+# Local environments and caches (rebuilt inside the images)
+.venv
+infra/.venv
+**/__pycache__
