@@ -2,6 +2,12 @@
 
 from dataclasses import dataclass
 
+# Release types, also used as the directory names on both buckets.
+FULL_RELEASE_TYPE = "full"
+DIFF_RELEASE_TYPE = "diff"
+FULL_DIR = f"{FULL_RELEASE_TYPE}/"
+DIFF_DIR = f"{DIFF_RELEASE_TYPE}/"
+
 
 def validate_releases_to_keep(releases_to_keep: int) -> None:
     """Require a positive retention count; zero would make the pruning slice empty."""
@@ -37,8 +43,8 @@ class Enrichment:
     def identifier(self) -> str:
         """Identifier for this enrichment's releases.
 
-        Used as the DynamoDB hash key, the Airflow asset name, and the source_uris
-        keys passed to comet publish. Never part of an S3 path.
+        Used as the DynamoDB hash key, the Airflow asset name, and a dataset
+        identifier passed to comet publish. S3 paths use the source and method separately.
         """
         return f"{self.source.identifier}-{self.method}"
 

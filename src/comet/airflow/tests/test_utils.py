@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowSkipException
 import pytest
 
-from comet.airflow.utils import get_airflow_connection, resolve_release_record
+from comet.airflow.utils import get_airflow_connection, previous_release, resolve_release_record
 
 
 def set_conn(monkeypatch, conn_id: str, **fields) -> None:
@@ -95,3 +95,22 @@ class TestResolveReleaseRecord:
         mocker.patch("comet.airflow.utils.dataset_releases.get_release", return_value=pruned)
         with pytest.raises(AirflowException, match="pruned"):
             resolve_release_record(dataset="datacite", release_date="2026-06-01")
+
+
+class TestPreviousRelease:
+    def test_returns_the_previous_release_full_prefix_and_date(self, mocker):
+        lookup = mocker.patch(
+            "comet.airflow.utils.dataset_releases.get_previous_release",
+            return_value=SimpleNamespace(full_source_prefix="dag/run-2/full/", release_date="2026-02-02"),
+        )
+
+        previous = previous_release(dataset="datacite-funders", release_date="2026-03-02")
+
+        assert previous == {"full_source_prefix": "dag/run-2/full/", "release_date": "2026-02-02"}
+        lookup.assert_called_once_with(dataset="datacite-funders", before="2026-03-02")
+
+    def test_skips_when_no_earlier_usable_release_exists(self, mocker):
+        mocker.patch("comet.airflow.utils.dataset_releases.get_previous_release", return_value=None)
+
+        with pytest.raises(AirflowSkipException):
+            previous_release(dataset="datacite-funders", release_date="2026-03-02")

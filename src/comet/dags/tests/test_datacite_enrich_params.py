@@ -54,10 +54,11 @@ class TestEnrichTriggerParams:
         trigger = enrich_trigger_params(params)
 
         # Each param defaults to the validated YAML value.
-        assert set(trigger) == {"source_id", "datacite_dag_id", "release_date"}
+        assert set(trigger) == {"source_id", "datacite_dag_id", "datacite_release_date", "replace_published"}
         assert trigger["source_id"].value == SOURCE_ID
         assert trigger["datacite_dag_id"].value == "custom_ingest"
-        assert trigger["release_date"].value is None
+        assert trigger["datacite_release_date"].value is None
+        assert trigger["replace_published"].value is False
         # A Trigger-form override is held to the same rule as the YAML.
         with pytest.raises(ParamValidationError):
             trigger["source_id"].resolve("10.١٢٣/example")

@@ -28,20 +28,21 @@ def publish(
     *,
     source: str,
     release_date: str,
-    source_uris: str,
+    datasets: str,
+    data_bucket: str,
     hf_bucket: str,
     hf_endpoint_url: str,
 ) -> None:
     """Publish a source's enrichment releases for a snapshot date to the Hugging Face bucket.
 
-    Copies each given dataset's release files to its release folder unless already
-    published, records the publish state, then renders and uploads the release index.
+    Copies each given dataset's full and diff directories to their release folders unless
+    already published, records the publish state, then renders and uploads the release index.
 
     Args:
         source: The source dataset name, e.g. "datacite".
         release_date: ISO date string "YYYY-MM-DD" of the snapshot to publish.
-        source_uris: JSON object mapping dataset name to its enrich run prefix S3 URI
-            on the data bucket (trailing slash).
+        datasets: JSON list of dataset identifiers to publish, e.g. '["datacite-funders"]'.
+        data_bucket: The data bucket holding the release directories.
         hf_bucket: The Hugging Face bucket name.
         hf_endpoint_url: The Hugging Face S3-compatible endpoint URL.
     """
@@ -53,10 +54,31 @@ def publish(
     exports.publish_releases(
         source=source,
         release_date=release_date,
-        source_uris=json.loads(source_uris),
+        datasets=json.loads(datasets),
+        data_bucket=data_bucket,
         hf_bucket=hf_bucket,
         endpoint_url=hf_endpoint_url,
     )
+
+
+@app.command
+def diff(
+    *,
+    old_uri: str,
+    new_uri: str,
+    output_uri: str,
+) -> None:
+    """Compare two full enrichment releases and upload their diff.
+
+    Args:
+        old_uri: S3 URI of the previous release's full directory (trailing slash).
+        new_uri: S3 URI of the current release's full directory (trailing slash).
+        output_uri: S3 URI to upload the diff release to (trailing slash).
+    """
+    from comet import diff as diff_runner
+
+    setup_logging()
+    diff_runner.diff_enrichments(old_uri=old_uri, new_uri=new_uri, output_uri=output_uri)
 
 
 @arxiv_app.command
