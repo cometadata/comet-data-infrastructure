@@ -5,7 +5,11 @@ Parameters:
   Env:
     Type: String
 
-  # Digest-pinned image URIs from SSM.
+  # Promoted ECR tag, for reference; the image parameters carry the digests resolved from it.
+  ImageTag:
+    Type: String
+
+  # Digest-pinned image URIs resolved from ImageTag.
   BatchImage:
     Type: String
 
@@ -365,6 +369,12 @@ Resources:
                   - 'echo "enrich-with-ror"'
 
 Outputs:
+  ImageTag:
+    Value: !Ref ImageTag
+  BatchImage:
+    Value: !Ref BatchImage
+  MarpleImage:
+    Value: !Ref MarpleImage
   BatchLogGroupName:
     Value: !Ref BatchLogGroup
   BatchJobRoleArn:

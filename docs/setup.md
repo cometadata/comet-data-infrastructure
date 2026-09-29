@@ -121,8 +121,8 @@ flowchart LR
     subgraph promote["Promote"]
         pm["make promote SOURCE_TAG=0.1.0"]
     end
-    ecr -->|"resolve tag to digests"| pm
-    pm -->|"digest URIs"| img["SSM images/batch, marple, airflow"]
+    ecr -->|"check tag exists in every repo"| pm
+    pm -->|"tag"| img["SSM images/tag"]
 
     subgraph deploy["Deploy"]
         vars["vars-dev.yaml"] -->|"make sync-vars"| varsp["SSM vars-dev.yaml"]
@@ -130,24 +130,19 @@ flowchart LR
         varsp --> ds
         ds -->|"make launch"| cfn["CloudFormation with<br/>DeploymentServiceRole"]
     end
-    img --> cfn
+    img -->|"resolve tag to digests"| ds
+    ecr --> ds
 ```
 
 Pushing to `main` runs the build pipeline, which builds the three images sequentially and tags them with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release pipeline, which adds `0.1.0` to those existing images without rebuilding them. The release fails if the commit was not built first.
 
-Release tags are retained. ECR retains the latest 50 `sha-*` builds and the latest three untagged images.
+Release tags are retained. ECR retains the latest 50 `sha-*` builds, the latest 10 `local-*` builds, and the latest three untagged images.
 
 The pipeline uses the GitHub connection and `codebuild_image` configured during the [first deployment](#first-deployment).
 
 ## Deploying dev stacks
 
-Deployments use image digest URIs stored in three SSM parameters:
-
-- `<ssm_prefix>/dev/images/batch`
-- `<ssm_prefix>/dev/images/marple`
-- `<ssm_prefix>/dev/images/airflow`
-
-Select an image set by tag. The command checks all three repositories before updating the parameters:
+Deployments use the image tag stored in the SSM parameter `<ssm_prefix>/dev/images/tag`. Select an image set by tag. The command checks all three repositories before updating the parameter:
 
 ```bash
 make promote SOURCE_TAG=0.1.0       # release
@@ -155,6 +150,10 @@ make promote SOURCE_TAG=sha-98dea10 # unreleased main build
 ```
 
 Custom local tags also work if all three images were pushed with the same tag. Unreleased SHA builds are not protected from ECR cleanup.
+
+Each `make diff` or `make launch` resolves the tag to digests, so task and job definitions stay digest-pinned. The `airflow` and `batch-jobs` stacks report the tag as `ImageTag` and the digest URIs as parameters and outputs.
+
+Releasing a commit removes its `sha-*` tag. Deploying a promoted `sha-*` tag then fails naming the missing image, while running services and jobs keep their digests. Promote the release tag instead, for example `make promote SOURCE_TAG=0.1.0`.
 
 Preview or launch locally with `make diff` and `make launch`. Use `STACK=<stack>.yaml` to target one stack.
 
@@ -174,7 +173,7 @@ make promote SOURCE_TAG="$IMAGE_TAG"
 make launch
 ```
 
-The `local-` prefix keeps these builds apart from the pipeline's `sha-*` tags for the same commit. ECR tags are immutable, so pushing again after further uncommitted changes needs a new tag. The individual `push-batch`, `push-marple`, and `push-airflow` targets build and push one image.
+The `local-` prefix keeps these builds apart from the pipeline's `sha-*` tags for the same commit. ECR tags are immutable, so pushing again after further uncommitted changes needs a new tag. Only the push targets need `ECR_REGISTRY`. The individual `push-batch`, `push-marple`, and `push-airflow` targets build and push one image.
 
 ### Airflow image
 
@@ -323,8 +322,8 @@ your own username and password to login after that.
 
 - Airflow service containers: CloudWatch `/comet/<env>/ecs/airflow`, one stream per container.
 - Fargate workers: CloudWatch `/comet/<env>/ecs/airflow-worker`.
-- Airflow task logs (what the UI shows): `s3://<stackname>-airflow-logs/logs/`.
-- Batch jobs: CloudWatch `/comet/<env>/batch/job`.
+- Airflow task logs (what the UI shows): `s3://<stackname>-airflow-logs/logs/`, kept for one year.
+- Batch jobs: CloudWatch `/comet/<env>/batch/job`. The output of single-container jobs is also copied into the Airflow task log.
 
 ## Recovering a failed enrichment
 

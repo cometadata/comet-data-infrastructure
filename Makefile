@@ -109,9 +109,9 @@ push-all: push-batch push-marple push-airflow
 retag:
 > scripts/retag.sh "$(ENV)" "$(SOURCE_TAG)" "$(VERSION_TAG)"
 
-# Select the image set deploys use, e.g. `make promote SOURCE_TAG=0.1.0`.
+# Select the image tag deploys use, e.g. `make promote SOURCE_TAG=0.1.0`.
 promote: check-source-tag
-> scripts/promote.sh "$(ENV)" "$(SOURCE_TAG)" "$(ECR_REGISTRY)"
+> scripts/promote.sh "$(ENV)" "$(SOURCE_TAG)"
 
 # Store vars-<env>.yaml in SSM for the deploy project.
 sync-vars:
@@ -196,3 +196,4 @@ lint-ci:
 
 test:
 > uv run --locked --extra airflow --extra dev pytest
+> uv run --project infra --locked --no-active pytest infra/resolvers/tests

@@ -1,0 +1,15 @@
+[project]
+name = "comet-resolvers"
+version = "0.0.0"
+description = "Sceptre resolvers for COMET deployments"
+requires-python = "==3.12.*"
+dependencies = [
+    "sceptre>=4,<5",
+]
+
+[project.entry-points."sceptre.resolvers"]
+ecr_image = "comet_resolvers.ecr_image:EcrImage"
+
+[build-system]
+requires = ["uv_build>=0.8,<1"]
+build-backend = "uv_build"

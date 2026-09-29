@@ -49,7 +49,7 @@ Resources:
     Type: 'AWS::CodeBuild::Project'
     Properties:
       Name: !Ref 'AWS::StackName'
-      Description: 'Runs Sceptre using the image digests currently stored in SSM'
+      Description: 'Runs Sceptre using the image tag currently promoted in SSM'
       ServiceRole: !Ref DeploymentRunnerRoleArn
       ConcurrentBuildLimit: 1
       QueuedTimeoutInMinutes: 60

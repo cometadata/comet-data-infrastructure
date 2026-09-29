@@ -99,7 +99,7 @@ The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image laye
 | `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs    |
 | `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers            |
 
-Images are stored in ECR and selected for deployment by sha256 digest in SSM. Main builds use `sha-*` tags; a release tag labels the existing images without rebuilding them. See [setup.md](setup.md#image-builds-and-releases) for the build and deployment procedure.
+Images are stored in ECR, selected for deployment by an image tag stored in SSM, and pinned to sha256 digests at deploy time. Main builds use `sha-*` tags; a release tag labels the existing images without rebuilding them. See [setup.md](setup.md#image-builds-and-releases) for the build and deployment procedure.
 
 ## Deployment permissions
 
