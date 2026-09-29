@@ -26,8 +26,8 @@ from comet.dags.tasks import (
 )
 from comet.utils import get_env
 
-ENRICH_VCPU = "8"
-ENRICH_MEMORY = "15360"
+ENRICH_VCPU = "16"
+ENRICH_MEMORY = "28672"
 WRITER_LANES = "4"
 
 BATCH_ATTEMPT_TIMEOUT = 3 * 60 * 60
