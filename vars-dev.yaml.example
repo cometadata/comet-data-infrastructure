@@ -18,6 +18,7 @@ code_connection_arn: ''
 github_repository_id: cometadata/comet-data-infrastructure
 
 # Metadata stack tags. The Environment and Service tags are injected by the Sceptre configs.
+# Don't set Subservice here; each stack config sets its own.
 stack_tags:
   CodeRepo: https://github.com/cometadata/comet-data-infrastructure
   Contact: ''
@@ -67,9 +68,8 @@ datacite_credentials_secret_arn: ''
 # See "Hugging Face publish credentials" in docs/setup.md.
 hf_credentials_secret_arn: ''
 
-# ARN of the Airflow Fernet key secret. CloudFormation does not manage this secret;
-# use the default aws/secretsmanager encryption key and see "Rotating the Fernet key"
-# in docs/setup.md.
+# ARN of the Airflow Fernet key secret, created by `make secrets`. CloudFormation does not
+# manage this secret; see "Rotating the Fernet key" in docs/setup.md.
 fernet_secret_arn: ''
 
 # Slack webhook connection secret ARN. See "Configure Slack alerts" in docs/setup.md.

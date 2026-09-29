@@ -2,6 +2,9 @@ template:
   path: monitoring/costs.j2
   type: file
 
+stack_tags:
+  Subservice: platform
+
 dependencies:
   - dev/monitoring/alerts.yaml
 

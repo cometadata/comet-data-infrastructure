@@ -3,12 +3,16 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: 'S3 storage for COMET'
 
 Resources:
+  # Each bucket sets its own Subservice, as they serve jobs, the platform and builds.
   S3Bucket:
     Type: 'AWS::S3::Bucket'
     DeletionPolicy: 'Retain'
     UpdateReplacePolicy: 'Retain'
     Properties:
       BucketName: !Sub '${AWS::StackName}-data'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'jobs'
       # Removing this makes CloudFormation call PutBucketAcl, which fails because the bucket has ACLs disabled.
       # Can be removed on a new deploy
       AccessControl: 'Private'
@@ -30,6 +34,9 @@ Resources:
     UpdateReplacePolicy: 'Retain'
     Properties:
       BucketName: !Sub '${AWS::StackName}-airflow-dags'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -54,6 +61,9 @@ Resources:
     UpdateReplacePolicy: 'Retain'
     Properties:
       BucketName: !Sub '${AWS::StackName}-airflow-logs'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'jobs'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -75,6 +85,9 @@ Resources:
     UpdateReplacePolicy: 'Retain'
     Properties:
       BucketName: !Sub '${AWS::StackName}-artifacts'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'build'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true

@@ -11,6 +11,7 @@ sg="$4"
 
 echo "Running init task on ${cluster} ..."
 task_arn=$(aws ecs run-task --cluster "$cluster" --task-definition "$taskdef" --launch-type FARGATE \
+  --propagate-tags TASK_DEFINITION \
   --network-configuration "awsvpcConfiguration={subnets=[${subnet}],securityGroups=[${sg}],assignPublicIp=DISABLED}" \
   --query 'tasks[0].taskArn' --output text)
 

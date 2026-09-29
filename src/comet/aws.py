@@ -289,7 +289,7 @@ AWSEnv = Literal["dev", "stg", "prd"]
 
 
 # Tag Batch runs consistently with deployed resources; Airflow renders the environment at runtime.
-BATCH_JOB_TAGS = {"Environment": "{{ get_env() }}", "Service": "comet"}
+BATCH_JOB_TAGS = {"Environment": "{{ get_env() }}", "Service": "comet", "Subservice": "jobs"}
 
 
 def batch_job_name(env: str, name: str) -> str:

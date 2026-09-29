@@ -132,10 +132,14 @@ Parameters:
     Description: Airflow UI address used in Slack links; the default suits the port-forward.
 
 Resources:
+  # Set Subservice per resource because this stack contains both platform and jobs resources.
   JwtSecret:
     Type: 'AWS::SecretsManager::Secret'
     Properties:
       Name: !Sub '${AWS::StackName}-jwt'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       Description: 'JWT signing secret for the Task Execution API that workers use (AIRFLOW__API_AUTH__JWT_SECRET)'
       GenerateSecretString:
         PasswordLength: 64
@@ -145,6 +149,9 @@ Resources:
     Type: 'AWS::SecretsManager::Secret'
     Properties:
       Name: !Sub '${AWS::StackName}-admin-password'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       Description: 'Airflow admin user password; the api-server resets the admin login to this on each start'
       GenerateSecretString:
         PasswordLength: 32
@@ -154,6 +161,9 @@ Resources:
     Type: 'AWS::SecretsManager::Secret'
     Properties:
       Name: !Sub '${AWS::StackName}-api-secret-key'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       Description: 'Flask session signing key for the api-server (AIRFLOW__API__SECRET_KEY)'
       GenerateSecretString:
         PasswordLength: 64
@@ -162,6 +172,9 @@ Resources:
   EcsCluster:
     Type: 'AWS::ECS::Cluster'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       ClusterSettings:
         - Name: containerInsights
           Value: disabled
@@ -196,6 +209,9 @@ Resources:
   EcsTaskExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
       Path: !Sub '/comet/${Env}/airflow/service/'
       AssumeRolePolicyDocument:
@@ -226,6 +242,9 @@ Resources:
   EcsTaskRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
       Path: !Sub '/comet/${Env}/airflow/service/'
       AssumeRolePolicyDocument:
@@ -297,6 +316,9 @@ Resources:
   AirflowWorkerExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'jobs'
       PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
       Path: !Sub '/comet/${Env}/airflow/worker/'
       AssumeRolePolicyDocument:
@@ -323,6 +345,9 @@ Resources:
   AirflowWorkerTaskRole:
     Type: 'AWS::IAM::Role'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'jobs'
       PermissionsBoundary: '{{ sceptre_user_data.permissions_boundary_arn }}'
       Path: !Sub '/comet/${Env}/airflow/worker/'
       AssumeRolePolicyDocument:
@@ -356,10 +381,12 @@ Resources:
                   StringEquals:
                     'aws:RequestTag/Environment': !Ref Env
                     'aws:RequestTag/Service': 'comet'
+                    'aws:RequestTag/Subservice': 'jobs'
                   'ForAllValues:StringEquals':
                     'aws:TagKeys':
                       - 'Environment'
                       - 'Service'
+                      - 'Subservice'
               - Effect: Allow
                 Action: 'batch:DescribeJobs'
                 Resource: '*'
@@ -409,12 +436,17 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       LogGroupName: !Sub '/comet/${Env}/ecs/airflow'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       RetentionInDays: 14
 
   # Runs `airflow db migrate` then exits. Run as a one-off task before the services roll.
   InitTaskDef:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
+      Tags:
+{% with subservice = 'platform' %}{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       Family: !Sub '${AWS::StackName}-init'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -445,6 +477,8 @@ Resources:
   ApiServerTaskDef:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
+      Tags:
+{% with subservice = 'platform' %}{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       Family: !Sub '${AWS::StackName}-api-server'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -487,6 +521,8 @@ Resources:
   SchedulerTaskDef:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
+      Tags:
+{% with subservice = 'platform' %}{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       Family: !Sub '${AWS::StackName}-scheduler'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -527,6 +563,8 @@ Resources:
   DagProcessorTaskDef:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
+      Tags:
+{% with subservice = 'platform' %}{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       Family: !Sub '${AWS::StackName}-dag-processor'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -569,6 +607,8 @@ Resources:
   TriggererTaskDef:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
+      Tags:
+{% with subservice = 'platform' %}{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       Family: !Sub '${AWS::StackName}-triggerer'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -608,12 +648,18 @@ Resources:
   AirflowPrivateDnsNamespace:
     Type: 'AWS::ServiceDiscovery::PrivateDnsNamespace'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       Name: {{ dns_namespace }}
       Vpc: !Ref VpcId
 
   ApiServerServiceDiscovery:
     Type: 'AWS::ServiceDiscovery::Service'
     Properties:
+      Tags:
+        - Key: 'Subservice'
+          Value: 'platform'
       Name: {{ api_server_name }}
       NamespaceId: !GetAtt AirflowPrivateDnsNamespace.Id
       DnsConfig:
@@ -628,6 +674,9 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       LogGroupName: !Sub '/comet/${Env}/ecs/airflow-worker'
+      Tags:
+        - Key: 'Subservice'
+          Value: 'jobs'
       RetentionInDays: 14
 
   # CPU/Memory can be overridden per task via executor_config.
@@ -644,7 +693,7 @@ Resources:
       TaskRoleArn: !GetAtt AirflowWorkerTaskRole.Arn
       # Tags do not automatically propagate to task definitions
       Tags:
-{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
+{% with subservice = 'jobs' %}{% filter indent(8, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       ContainerDefinitions:
         - Name: worker
           Image: !Ref AirflowImage

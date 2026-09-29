@@ -103,6 +103,18 @@ def tag_keys(tag_list):
     return {tag["Key"] for tag in tag_list or []}
 
 
+def tag_values(node, key):
+    """Collect every value of a tag key anywhere under node, in list or dict tag form."""
+    if isinstance(node, dict):
+        if node.get("Key") == key and "Value" in node:
+            return [node["Value"]]
+        values = [node[key]] if key in node and not isinstance(node[key], (dict, list)) else []
+        return values + [v for child in node.values() for v in tag_values(child, key)]
+    if isinstance(node, list):
+        return [v for child in node for v in tag_values(child, key)]
+    return []
+
+
 @pytest.fixture(scope="session")
 def stack_configs():
     """Render Sceptre configs, keyed by stack path."""

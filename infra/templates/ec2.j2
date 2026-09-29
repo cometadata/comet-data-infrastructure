@@ -45,7 +45,7 @@ Resources:
       TagSpecifications:
         - ResourceType: 'launch-template'
           Tags:
-{% filter indent(12, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
+{% with subservice = 'dev-instance' %}{% filter indent(12, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
       LaunchTemplateData:
         InstanceType: !Ref InstanceType
         ImageId: !Ref ImageId
@@ -70,7 +70,7 @@ Resources:
             Tags:
               - Key: 'Name'
                 Value: !Ref 'AWS::StackName'
-{% filter indent(14, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}
+{% with subservice = 'dev-instance' %}{% filter indent(14, true) %}{% include 'includes/stack-tags.j2' %}{% endfilter %}{% endwith %}
 {% endfor %}
         UserData:
           Fn::Base64: !Sub |

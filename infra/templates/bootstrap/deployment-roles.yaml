@@ -115,6 +115,7 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/*'
                   - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:comet-${Env}-*'
                   - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:subgrp:comet-${Env}-*'
+                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:es:comet-${Env}-*'
                   - !Sub 'arn:${AWS::Partition}:s3:::comet-${Env}-*'
                   - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:comet-${Env}-*'
                   - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:comet-${Env}-*'
@@ -287,6 +288,13 @@ Resources:
                 Condition:
                   ArnLike:
                     'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/comet-${Env}-airflow*'
+              - Sid: 'TagAirflowMigrations'
+                Effect: 'Allow'
+                Action: 'ecs:TagResource'
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/comet-${Env}-airflow*/*'
+                Condition:
+                  StringEquals:
+                    'ecs:CreateAction': 'RunTask'
               - Sid: 'PassAirflowServiceRoles'
                 Effect: 'Allow'
                 Action: 'iam:PassRole'

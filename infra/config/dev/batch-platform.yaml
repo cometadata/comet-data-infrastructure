@@ -2,6 +2,9 @@ template:
   path: batch-platform.j2
   type: file
 
+stack_tags:
+  Subservice: jobs
+
 dependencies:
   - dev/security-groups.yaml
 

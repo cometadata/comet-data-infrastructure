@@ -2,6 +2,9 @@ template:
   path: batch-jobs.j2
   type: file
 
+stack_tags:
+  Subservice: jobs
+
 dependencies:
   - dev/s3.yaml
   - dev/dynamodb.yaml

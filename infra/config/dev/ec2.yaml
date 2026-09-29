@@ -2,6 +2,9 @@ template:
   path: 'ec2.j2'
   type: 'file'
 
+stack_tags:
+  Subservice: dev-instance
+
 parameters:
   Env: "{{ var.env }}"
   ImageId: !ssm '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
