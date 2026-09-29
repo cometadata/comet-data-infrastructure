@@ -254,7 +254,7 @@ Resources:
           - -c
           - 'echo "enrich placeholder"'
 
-  # enrich-with-ror: opensearch + marple + main containers, sized for c5ad.xlarge.
+  # enrich-with-ror: opensearch + marple + main containers. The DAGs set each container's vCPU and memory.
   EnrichWithRorJob:
     Type: 'AWS::Batch::JobDefinition'
     Properties:
