@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from airflow import DAG  # noqa: TC002  # loader's get_type_hints() evaluates the `-> DAG` return at runtime
-from airflow.sdk import dag, task
+from airflow.exceptions import AirflowException
+from airflow.sdk import Param, dag, get_current_context, task
 from airflow.sdk.exceptions import AirflowSkipException
 import pendulum
 
@@ -14,7 +15,7 @@ from comet.constants import ROR_SOURCE
 from comet.dags.tasks import persist_release, publish_release_asset
 import comet.dynamodb_store as dataset_releases
 from comet.model.dataset_version_model import DatasetRelease
-from comet.ror.ror import download_ror, get_new_ror_release
+from comet.ror.ror import download_ror, get_ror_release
 
 
 class RorIngestParams(BaseDagParams):
@@ -42,15 +43,36 @@ def create_ror_ingest_dag(dag_id: str, params: RorIngestParams) -> DAG:
         dag_id=dag_id,
         description="Ingest new ROR releases.",
         schedule="@daily",
+        params={
+            "release_date": Param(
+                None,
+                type=["null", "string"],
+                format="date",
+                title="ROR release date",
+                description=(
+                    "Ingest the ROR release published on this date (YYYY-MM-DD). "
+                    "Empty = the newest release not yet ingested."
+                ),
+            ),
+        },
         **params.dag_kwargs(),
         **alert_kwargs(params.deadline_minutes),
     )
     def ror_dag():
         @task
         def fetch_release() -> dict:
+            release_date = get_current_context()["params"]["release_date"]
+            if release_date:
+                day = pendulum.parse(release_date, exact=True)
+                release = get_ror_release(start_date=day, end_date=day)
+                if release is None:
+                    raise AirflowException(f"No ROR release was published on {release_date}")
+                return release.to_dict()
+
             latest_release = dataset_releases.get_latest_release(dataset=ROR_SOURCE.identifier)
-            published_after = pendulum.parse(latest_release.release_date) if latest_release else None
-            release = get_new_ror_release(published_after=published_after)
+            # Look for releases published after the latest ingested one.
+            start_date = pendulum.parse(latest_release.release_date, exact=True).add(days=1) if latest_release else None
+            release = get_ror_release(start_date=start_date)
 
             if release is None:
                 raise AirflowSkipException("No new ROR version available")

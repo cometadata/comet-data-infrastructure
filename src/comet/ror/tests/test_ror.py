@@ -5,39 +5,40 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pendulum
+import pytest
 import vcr
 
 from comet.aws import DownloadTaskContext
 from comet.model.dataset_version_model import DatasetRelease
-from comet.ror.ror import download_ror, get_new_ror_release
+from comet.ror.ror import download_ror, get_ror_release
 from comet.ror.tests.conftest import FIXTURES_DIR
 
 ROR_ZENODO_CASSETTE = FIXTURES_DIR / "ror_zenodo.yaml"
 
 
-class TestGetNewRorRelease:
-    def test_returns_latest_release(self):
+class TestGetRorRelease:
+    def test_returns_release_published_on_date(self):
         with vcr.use_cassette(str(ROR_ZENODO_CASSETTE)):
-            result = get_new_ror_release(published_after=None)
+            result = get_ror_release(start_date=pendulum.date(2026, 7, 20), end_date=pendulum.date(2026, 7, 20))
 
-        assert isinstance(result, DatasetRelease)
-        assert result.release_date == pendulum.date(2026, 3, 12)
-        assert (
-            result.download_url == "https://zenodo.org/api/records/18985120/files/v2.4-2026-03-12-ror-data.zip/content"
+        assert result == DatasetRelease(
+            release_date=pendulum.date(2026, 7, 20),
+            download_url="https://zenodo.org/api/records/21458494/files/v2.10-2026-07-20-ror-data.zip/content",
+            file_name="v2.10-2026-07-20-ror-data.zip",
+            file_hash="md5:ad7e842ce1b296fc066a0babe86ec48e",
         )
-        assert result.file_hash == "md5:b04f7419253f96846365a0a36b5041aa"
-        assert result.file_name == "v2.4-2026-03-12-ror-data.zip"
 
-    def test_latest_release_date_returns_none(self):
-        # Passing the date we already have yields nothing newer.
+    @pytest.mark.parametrize(
+        ("start_date", "end_date"),
+        [
+            (pendulum.date(2026, 7, 21), pendulum.date(2026, 7, 21)),
+            (pendulum.date(2026, 9, 23), None),
+        ],
+        ids=["no-release-that-day", "nothing-newer"],
+    )
+    def test_returns_none_when_no_release_matches(self, start_date, end_date):
         with vcr.use_cassette(str(ROR_ZENODO_CASSETTE)):
-            result = get_new_ror_release(published_after=pendulum.datetime(2026, 3, 12, tz="UTC"))
-
-        assert result is None
-
-    def test_future_date_returns_none(self):
-        with vcr.use_cassette(str(ROR_ZENODO_CASSETTE)):
-            result = get_new_ror_release(published_after=pendulum.datetime(2099, 1, 1, tz="UTC"))
+            result = get_ror_release(start_date=start_date, end_date=end_date)
 
         assert result is None
 
