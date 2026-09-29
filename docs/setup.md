@@ -168,6 +168,8 @@ To deploy without a workstation checkout, open the `comet-dev-deploy` project in
 
 Run `make sync-vars` whenever `vars-dev.yaml` changes so the deploy project receives the new settings.
 
+`make sync-vars` and `make promote` apply the stack tags and `Subservice: build` to their SSM parameters.
+
 ### Deploying a local build
 
 To deploy the current checkout without going through the pipeline, build and push all three images with a local tag, promote that tag, and launch:
@@ -195,7 +197,7 @@ To bump the Airflow version, edit `AIRFLOW_VERSION` in `versions.env`, then:
 
 ```bash
 make bump-airflow
-uv run --locked --extra airflow --extra dev pytest
+uv run --locked --extra airflow --group test pytest
 ```
 
 Commit `versions.env`, `pyproject.toml`, and `uv.lock` together. The main pipeline builds the new image set; promote its SHA or a subsequent release tag before launching the Airflow services.

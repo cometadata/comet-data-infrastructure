@@ -13,8 +13,6 @@ phases:
             export VERSION_TAG="${TRIGGER_TAG#v}"
             ;;
           build)
-            . ./versions.env
-            curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh
             mkdir -p ~/.docker && echo "{\"credHelpers\":{\"$ECR_REGISTRY\":\"ecr-login\"}}" > ~/.docker/config.json
             docker buildx create --driver docker-container --use
             ;;
@@ -23,6 +21,8 @@ phases:
             exit 1
             ;;
         esac
+      # Both modes run make targets that use uv.
+      - . ./versions.env && curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh
   build:
     commands:
       - |

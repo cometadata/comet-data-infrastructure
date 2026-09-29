@@ -849,6 +849,13 @@ airflow = [
     { name = "apache-airflow-providers-amazon", extra = ["aiobotocore"] },
     { name = "apache-airflow-providers-slack" },
 ]
+notebooks = [
+    { name = "duckdb-engine" },
+    { name = "jupysql" },
+    { name = "jupyterlab" },
+]
+
+[package.dev-dependencies]
 dev = [
     { name = "aiohttp" },
     { name = "jinja2" },
@@ -858,38 +865,57 @@ dev = [
     { name = "ruff" },
     { name = "vcrpy" },
 ]
-notebooks = [
-    { name = "duckdb-engine" },
-    { name = "jupysql" },
-    { name = "jupyterlab" },
+lint = [
+    { name = "ruff" },
+]
+test = [
+    { name = "aiohttp" },
+    { name = "jinja2" },
+    { name = "moto" },
+    { name = "pytest" },
+    { name = "pytest-mock" },
+    { name = "vcrpy" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", marker = "extra == 'dev'", specifier = ">=3.12.14" },
     { name = "apache-airflow", extras = ["amazon", "fab", "postgres", "standard"], marker = "extra == 'airflow'", specifier = "==3.3.1" },
     { name = "apache-airflow-providers-amazon", extras = ["aiobotocore"], marker = "extra == 'airflow'", specifier = ">=9.34.0" },
     { name = "apache-airflow-providers-slack", marker = "extra == 'airflow'", specifier = ">=9.10.2,<10" },
     { name = "boto3", specifier = ">=1,<2" },
     { name = "cyclopts", specifier = ">=4,<5" },
     { name = "duckdb-engine", marker = "extra == 'notebooks'", specifier = ">=0.17.0,<1" },
-    { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3,<4" },
     { name = "jupysql", marker = "extra == 'notebooks'", specifier = ">=0.11.1,<1" },
     { name = "jupyterlab", marker = "extra == 'notebooks'", specifier = ">=4,<5" },
-    { name = "moto", marker = "extra == 'dev'", specifier = ">=5.2.1" },
     { name = "pendulum", specifier = ">=3.2.0" },
     { name = "pooch", specifier = ">=1.9.0" },
     { name = "pyarrow", specifier = ">=19,<26" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pynamodb", specifier = ">=6.1.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3,<4" },
     { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "tqdm", specifier = ">=4,<5" },
-    { name = "vcrpy", marker = "extra == 'dev'", specifier = ">=8.2" },
 ]
-provides-extras = ["dev", "notebooks", "airflow"]
+provides-extras = ["notebooks", "airflow"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "aiohttp", specifier = ">=3.12.14" },
+    { name = "jinja2", specifier = ">=3,<4" },
+    { name = "moto", specifier = ">=5.2.1" },
+    { name = "pytest", specifier = ">=8,<10" },
+    { name = "pytest-mock", specifier = ">=3,<4" },
+    { name = "ruff", specifier = ">=0.9" },
+    { name = "vcrpy", specifier = ">=8.2" },
+]
+lint = [{ name = "ruff", specifier = ">=0.9" }]
+test = [
+    { name = "aiohttp", specifier = ">=3.12.14" },
+    { name = "jinja2", specifier = ">=3,<4" },
+    { name = "moto", specifier = ">=5.2.1" },
+    { name = "pytest", specifier = ">=8,<10" },
+    { name = "pytest-mock", specifier = ">=3,<4" },
+    { name = "vcrpy", specifier = ">=8.2" },
+]
 
 [[package]]
 name = "comm"
