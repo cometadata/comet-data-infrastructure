@@ -572,6 +572,20 @@ class TestCosts:
             ]
         }
 
+    def test_budgets_without_tag_filters_are_limited_to_the_deployment_region(self, rendered_templates):
+        resources = rendered_templates["monitoring/costs.j2"]["Resources"]
+        region = {"Dimensions": {"Key": "REGION", "Values": [TaggedValue("Ref", "AWS::Region")]}}
+        unscoped = []
+        for logical_id, resource in resources.items():
+            if resource["Type"] != "AWS::Budgets::Budget":
+                continue
+            expression = resource["Properties"]["Budget"]["FilterExpression"]
+            clauses = expression.get("And", [expression])
+            if not any("Tags" in clause for clause in clauses) and region not in clauses:
+                unscoped.append(logical_id)
+
+        assert not unscoped, f"budgets with neither a tag nor a region filter: {unscoped}"
+
     def test_budget_metrics_preserve_cost_and_usage_semantics(self, rendered_templates):
         resources = rendered_templates["monitoring/costs.j2"]["Resources"]
 
@@ -593,9 +607,9 @@ class TestCosts:
             }
         ]
 
-        for logical_id in ("MonthlyCostBudget", "EgressBudget"):
-            notifications = resources[logical_id]["Properties"]["NotificationsWithSubscribers"]
-            for notification in notifications:
+        budgets = [resource for resource in resources.values() if resource["Type"] == "AWS::Budgets::Budget"]
+        for budget in budgets:
+            for notification in budget["Properties"]["NotificationsWithSubscribers"]:
                 assert notification["Subscribers"] == expected_subscribers
 
 
@@ -659,6 +673,7 @@ class TestMonitoringConfig:
             "monitoring/alarms.j2": {
                 "LogIngestionBytesPer5MinThreshold": 10_485_760,
                 "S3TotalBytesThreshold": 1_073_741_824_000,
+                "ConfigItemsPerHourThreshold": 500,
             },
             "monitoring/monitor.j2": {
                 "ComputeAgeHoursThreshold": 16,
@@ -668,6 +683,9 @@ class TestMonitoringConfig:
             "monitoring/costs.j2": {
                 "MonthlyBudgetUsd": 150,
                 "EgressBudgetGb": 500,
+                "ConfigBudgetUsd": 10,
+                "CloudWatchBudgetUsd": 10,
+                "RegionBudgetUsd": 200,
             },
         }
 

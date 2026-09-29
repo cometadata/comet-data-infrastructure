@@ -27,6 +27,9 @@ Parameters:
   S3TotalBytesThreshold:
     Type: Number
 
+  ConfigItemsPerHourThreshold:
+    Type: Number
+
 Resources:
   # Alarm if COMET log ingestion exceeds the per-five-minute byte
   # threshold in at least two of the last four periods.
@@ -86,6 +89,26 @@ Resources:
             Period: 86400
             Stat: Average
 {% endfor %}
+
+  # Includes configuration items for all resources recorded in this account and region.
+  ConfigItemsAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-config-items'
+      AlarmDescription: 'AWS Config recorded more configuration items in an hour than the threshold'
+      Namespace: AWS/Config
+      MetricName: ConfigurationItemsRecorded
+      Dimensions:
+        - Name: ResourceType
+          Value: All
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: !Ref ConfigItemsPerHourThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
 
   # Notify SNS alert topic when RDS instance generates a 'low storage'
   # or 'configuration change' event.

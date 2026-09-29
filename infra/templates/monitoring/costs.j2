@@ -12,6 +12,15 @@ Parameters:
   EgressBudgetGb:
     Type: Number
 
+  ConfigBudgetUsd:
+    Type: Number
+
+  CloudWatchBudgetUsd:
+    Type: Number
+
+  RegionBudgetUsd:
+    Type: Number
+
 Resources:
   # Create a monthly budget for resources tagged with this service and
   # environment. Send alerts when actual spending exceeds 75%, 90%, or 100%
@@ -82,6 +91,108 @@ Resources:
           - UsageQuantity
       NotificationsWithSubscribers:
 {% for notification_type, threshold in [('ACTUAL', 50), ('ACTUAL', 75), ('ACTUAL', 100), ('FORECASTED', 100)] %}
+        - Notification:
+            NotificationType: {{ notification_type }}
+            ComparisonOperator: GREATER_THAN
+            Threshold: {{ threshold }}
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopicArn
+{% endfor %}
+
+  # Track AWS Config spend in this region. Config charges are not tagged.
+  ConfigBudget:
+    Type: 'AWS::Budgets::Budget'
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-config'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref ConfigBudgetUsd
+          Unit: USD
+        FilterExpression:
+          And:
+            - Dimensions:
+                Key: REGION
+                Values:
+                  - !Ref 'AWS::Region'
+            - Dimensions:
+                Key: SERVICE
+                Values:
+                  - 'AWS Config'
+        Metrics:
+          - AmortizedCost
+      NotificationsWithSubscribers:
+{% for notification_type, threshold in [('ACTUAL', 50), ('ACTUAL', 75), ('ACTUAL', 100), ('FORECASTED', 100)] %}
+        - Notification:
+            NotificationType: {{ notification_type }}
+            ComparisonOperator: GREATER_THAN
+            Threshold: {{ threshold }}
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopicArn
+{% endfor %}
+
+  # Track CloudWatch spend in this region. Most CloudWatch charges are not
+  # tagged.
+  CloudWatchBudget:
+    Type: 'AWS::Budgets::Budget'
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-cloudwatch'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref CloudWatchBudgetUsd
+          Unit: USD
+        FilterExpression:
+          And:
+            - Dimensions:
+                Key: REGION
+                Values:
+                  - !Ref 'AWS::Region'
+            - Dimensions:
+                Key: SERVICE
+                Values:
+                  - 'AmazonCloudWatch'
+        Metrics:
+          - AmortizedCost
+      NotificationsWithSubscribers:
+{% for notification_type, threshold in [('ACTUAL', 50), ('ACTUAL', 75), ('ACTUAL', 100), ('FORECASTED', 100)] %}
+        - Notification:
+            NotificationType: {{ notification_type }}
+            ComparisonOperator: GREATER_THAN
+            Threshold: {{ threshold }}
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertTopicArn
+{% endfor %}
+
+  # Track all spend in this region, tagged or not, to catch what the other
+  # budgets miss.
+  RegionBudget:
+    Type: 'AWS::Budgets::Budget'
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-region'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref RegionBudgetUsd
+          Unit: USD
+        FilterExpression:
+          Dimensions:
+            Key: REGION
+            Values:
+              - !Ref 'AWS::Region'
+        Metrics:
+          - AmortizedCost
+      NotificationsWithSubscribers:
+{% for notification_type, threshold in [('ACTUAL', 100), ('FORECASTED', 100)] %}
         - Notification:
             NotificationType: {{ notification_type }}
             ComparisonOperator: GREATER_THAN

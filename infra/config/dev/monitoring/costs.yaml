@@ -9,3 +9,6 @@ parameters:
   AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
   MonthlyBudgetUsd: {{ var.monthly_budget_usd }}
   EgressBudgetGb: {{ var.egress_budget_gb }}
+  ConfigBudgetUsd: {{ var.config_budget_usd }}
+  CloudWatchBudgetUsd: {{ var.cloudwatch_budget_usd }}
+  RegionBudgetUsd: {{ var.region_budget_usd }}

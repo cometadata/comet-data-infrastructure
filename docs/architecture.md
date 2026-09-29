@@ -115,6 +115,7 @@ The permissions boundary is attached to every IAM role created by the environmen
 
 * CloudWatch Logs: alarm when log ingestion exceeds the per-five-minute byte threshold in at least two of the last four periods.
 * S3: alarm when combined storage across the four project buckets exceeds the configured threshold.
+* AWS Config: alarm when the number of configuration items recorded in an hour exceeds the threshold. The count covers every resource that Config records in the region, not only COMET's.
 * RDS: forward low-storage and configuration-change events to the monitoring SNS topic.
 * EC2 and Fargate worker tasks:
   * Alarm when tasks exceeds the age threshold for two consecutive five-minute periods.
@@ -127,6 +128,8 @@ The permissions boundary is attached to every IAM role created by the environmen
 ### Cost budgets
 * Track monthly amortized costs, alerting at 75%, 90%, and 100% of actual spend and 100% of forecast spend.
 * Track monthly internet egress, alerting at 50%, 75%, and 100% of actual usage and 100% of forecast usage.
+* Track monthly AWS Config and CloudWatch spend in the deployment region, alerting at 50%, 75%, and 100% of actual spend and 100% of forecast spend.
+* Track all monthly spend in the deployment region, alerting at 100% of actual spend and 100% of forecast spend.
 
 ### Notifications
 
