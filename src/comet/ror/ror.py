@@ -12,20 +12,20 @@ logger = logging.getLogger(__name__)
 ROR_ZENODO_CONCEPT_ID = 6347574
 
 
-def get_new_ror_release(*, published_after: pendulum.DateTime | None = None) -> DatasetRelease | None:
-    """Return the newest ROR release published strictly after ``published_after``.
+def get_ror_release(
+    *, start_date: pendulum.Date | None = None, end_date: pendulum.Date | None = None
+) -> DatasetRelease | None:
+    """Return the newest ROR release published between ``start_date`` and ``end_date`` inclusive.
 
     Args:
-        published_after: Release datetime of the most recent known version. Only
-            releases published strictly after this date are considered. If None, no
-            lower bound is applied.
+        start_date: Earliest publication date to consider; no lower bound if None.
+        end_date: Latest publication date to consider; no upper bound if None.
 
     Returns:
         DatasetRelease with release_date, download_url, file_name, and file_hash set,
-        or None if there is no newer release.
+        or None if no release matches.
     """
-    end_date = pendulum.now("UTC")
-    records = list_zenodo_records(conceptrecid=ROR_ZENODO_CONCEPT_ID, start_date=published_after, end_date=end_date)
+    records = list_zenodo_records(conceptrecid=ROR_ZENODO_CONCEPT_ID, start_date=start_date, end_date=end_date)
     logger.info(f"ROR Zenodo records found: {len(records)}")
     if not records:
         return None
