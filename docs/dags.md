@@ -10,7 +10,9 @@ s3://<stackname>-airflow-dags/
   dags.yaml   # one entry per DAG instance
 ```
 
-Both files come down in the same bundle snapshot, so `dags.py` reads its sibling `dags.yaml` from local disk. The bundle refreshes every 60 seconds. The bucket is versioned, so a bad push is recoverable via S3 object versions.
+The S3 DAG bundle downloads both files into a local directory, where `dags.py` reads its sibling `dags.yaml`. The API server, scheduler, and DAG processor use a 60-second bundle refresh interval. Workers download their own copy at startup and use a one-day refresh interval.
+
+The bucket is versioned, so earlier files can be recovered while their S3 object versions are retained.
 
 ## Add a DAG instance
 
