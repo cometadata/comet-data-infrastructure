@@ -11,9 +11,9 @@ image. The `/data` directory is the NVMe mount on the instance; the
 pipeline writes under `/data/arxiv/<release-date>/` by default.
 
 Set the bucket, release date, and image env vars up front: the commands
-below reference them. Images are tagged with the short commit sha or a
-release version (see "Image builds and releases" in setup.md); normally use
-the promoted tag:
+below reference them. Images are tagged `sha-<short-commit>` or with a
+release version (see [Image builds and releases](setup.md#image-builds-and-releases));
+normally use the promoted tag:
 
 ```bash
 export BUCKET="<your-s3-data-bucket>"
@@ -22,7 +22,7 @@ export IMAGE="<aws-account-id>.dkr.ecr.<region>.amazonaws.com/comet-dev-batch:<t
 docker pull "$IMAGE"
 ```
 
-## Test run (two batches, largest-first)
+## Test run (two batches, smallest-first)
 
 ```bash
 nohup docker run --rm \
@@ -38,9 +38,8 @@ nohup docker run --rm \
 tail -f "/data/arxiv-pipeline-${RELEASE_DATE}.log"
 ```
 
-Omitting `--cpus` lets the container use all host CPUs. `--sort-order
-largest` processes the biggest tars first: a good shake-down for memory
-behaviour.
+Omitting `--cpus` lets the container use all host CPUs. For a memory stress
+check, use `--sort-order largest` to process the biggest tars first.
 
 ## Full run
 
