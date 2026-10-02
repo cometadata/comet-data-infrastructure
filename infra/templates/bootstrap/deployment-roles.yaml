@@ -273,6 +273,11 @@ Resources:
                 Action: 'cloudformation:DescribeStacks'
                 Resource: '*'
 
+              - Sid: 'ResolveManagedPrefixLists'
+                Effect: 'Allow'
+                Action: 'ec2:DescribeManagedPrefixLists'
+                Resource: '*'
+
               # Delegate stack deployment to CloudFormation and Airflow migrations to ECS.
               - Sid: 'PassDeploymentServiceRole'
                 Effect: 'Allow'

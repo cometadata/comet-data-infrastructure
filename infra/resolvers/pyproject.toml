@@ -9,6 +9,7 @@ dependencies = [
 
 [project.entry-points."sceptre.resolvers"]
 ecr_image = "comet_resolvers.ecr_image:EcrImage"
+prefix_list = "comet_resolvers.prefix_list:PrefixList"
 
 [build-system]
 requires = ["uv_build>=0.8,<1"]
