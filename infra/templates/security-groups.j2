@@ -6,15 +6,24 @@ Parameters:
     Type: 'String'
     Description: 'The VPC ID for these security groups.'
 
+  S3PrefixListId:
+    Type: 'String'
+    Description: 'Managed prefix list for the S3 gateway endpoint.'
+
 Resources:
-  # Four security groups: services, jobs (zero ingress), endpoints, and rds. Cross-SG rules are
-  # standalone to avoid circular references.
+  # Inline loopback rules suppress default allow-all egress.
+  # Cross-group rules are separate resources to avoid circular dependencies.
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-securitygroup.html#aws-resource-ec2-securitygroup--examples--Remove_the_default_rule
   ServicesSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupName: !Sub '${AWS::StackName}-services-sg'
       GroupDescription: 'Airflow services task and ECS host'
       VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: Placeholder replacing the default allow-all rule
+          IpProtocol: -1
+          CidrIp: 127.0.0.1/32
 
   ServicesIngressApiFromJobs:
     Type: 'AWS::EC2::SecurityGroupIngress'
@@ -36,14 +45,44 @@ Resources:
       SourceSecurityGroupId: !Ref ServicesSecurityGroup
       GroupId: !Ref ServicesSecurityGroup
 
-  ServicesEgress:
+  ServicesEgressHttpsToEndpoints:
     Type: 'AWS::EC2::SecurityGroupEgress'
     Properties:
-      Description: Allow all outbound traffic
-      IpProtocol: -1
-      FromPort: -1
-      ToPort: -1
-      CidrIp: 0.0.0.0/0
+      Description: HTTPS to the interface endpoints
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref EndpointsSecurityGroup
+      GroupId: !Ref ServicesSecurityGroup
+
+  ServicesEgressHttpsToS3:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: HTTPS to S3 through the gateway endpoint
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationPrefixListId: !Ref S3PrefixListId
+      GroupId: !Ref ServicesSecurityGroup
+
+  ServicesEgressPostgresToRds:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: PostgreSQL to the metadata database
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref RdsSecurityGroup
+      GroupId: !Ref ServicesSecurityGroup
+
+  ServicesEgressApiSelf:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: Internal access to the api-server on 8080
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      DestinationSecurityGroupId: !Ref ServicesSecurityGroup
       GroupId: !Ref ServicesSecurityGroup
 
   JobsSecurityGroup:
@@ -52,15 +91,60 @@ Resources:
       GroupName: !Sub '${AWS::StackName}-jobs-sg'
       GroupDescription: 'Fargate workers, Batch instances, dev EC2 - no ingress'
       VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: Placeholder replacing the default allow-all rule
+          IpProtocol: -1
+          CidrIp: 127.0.0.1/32
 
-  JobsEgress:
+  JobsEgressHttpsToInternet:
     Type: 'AWS::EC2::SecurityGroupEgress'
     Properties:
-      Description: Allow all outbound traffic
-      IpProtocol: -1
-      FromPort: -1
-      ToPort: -1
+      Description: HTTPS to the internet
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
       CidrIp: 0.0.0.0/0
+      GroupId: !Ref JobsSecurityGroup
+
+  JobsEgressHttpToInternet:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: HTTP to the internet
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+      GroupId: !Ref JobsSecurityGroup
+
+  # Redundant with internet HTTPS; retained to show AWS dependencies in the console.
+  JobsEgressHttpsToEndpoints:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: HTTPS to the interface endpoints
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref EndpointsSecurityGroup
+      GroupId: !Ref JobsSecurityGroup
+
+  JobsEgressHttpsToS3:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: HTTPS to S3 through the gateway endpoint
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationPrefixListId: !Ref S3PrefixListId
+      GroupId: !Ref JobsSecurityGroup
+
+  JobsEgressApiToServices:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: Task Execution API on the api-server
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      DestinationSecurityGroupId: !Ref ServicesSecurityGroup
       GroupId: !Ref JobsSecurityGroup
 
   EndpointsSecurityGroup:
@@ -69,6 +153,10 @@ Resources:
       GroupName: !Sub '${AWS::StackName}-endpoints-sg'
       GroupDescription: 'VPC interface endpoint ENIs'
       VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: Placeholder replacing the default allow-all rule
+          IpProtocol: -1
+          CidrIp: 127.0.0.1/32
 
   EndpointsIngressFromServices:
     Type: 'AWS::EC2::SecurityGroupIngress'
@@ -96,6 +184,10 @@ Resources:
       GroupName: !Sub '${AWS::StackName}-rds-sg'
       GroupDescription: !Sub 'RDS access for ${AWS::StackName}'
       VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: Placeholder replacing the default allow-all rule
+          IpProtocol: -1
+          CidrIp: 127.0.0.1/32
 
   RdsIngressFromServices:
     Type: 'AWS::EC2::SecurityGroupIngress'
