@@ -2,13 +2,15 @@
 
 COMET runs data processing workflows that download and enrich external scholarly datasets such as [DataCite](https://datacite.org), [ROR](https://ror.org), and [arXiv](https://arxiv.org). [Apache Airflow 3](https://airflow.apache.org) provides the workflow orchestration layer, while ECS Fargate and AWS Batch provide the compute for processing tasks.
 
-Everything is defined in CloudFormation and deployed with [Sceptre](https://docs.sceptre-project.org/) into a single availability zone. The Airflow services and the metadata database run in a private subnet; the Fargate workers, Batch instances, and the dev instance run in a public subnet because they download external data. See [setup.md](setup.md) for how to deploy.
+COMET-managed infrastructure is defined in CloudFormation and deployed with [Sceptre](https://docs.sceptre-project.org/). The shared network, template bucket, authorized GitHub connection, and some secrets are external prerequisites; deployment settings and enrichment configuration are supplied separately. See [AWS account prerequisites](setup.md#aws-account-prerequisites) and [setup.md](setup.md) for deployment instructions.
+
+Compute and the metadata database run in a single availability zone. The persistent Airflow services and database use a private subnet; ephemeral Fargate workers, Batch instances, and the dev instance use a public subnet to download external data.
 
 ![Architecture](img/architecture.png)
 
 ## Data pipelines
 
-Two ingest DAGs run daily. Each checks the upstream source for a release newer than the last one recorded in the `comet-<env>-dataset-releases` DynamoDB table, downloads it to `s3://<data-bucket>/{dag_id}/{run_id}/`, records the release, and publishes an Airflow Asset. The three DataCite enrichment DAGs are scheduled on the DataCite asset, so they run whenever a new DataCite snapshot is ingested.
+Two ingest DAGs run daily. Each checks the upstream source for a release newer than the last one recorded in the `comet-<env>-dataset-releases` DynamoDB table, downloads it to `s3://<data-bucket>/{dag_id}/{run_id}/`, records the release, and publishes an Airflow Asset. The asset is updated after ingestion completes, not when discovery finds a release. The three DataCite enrichment DAGs are scheduled on the DataCite asset, so they run whenever a new DataCite snapshot is ingested. Funders and affiliations use a selected ROR release as input; ROR ingestion alone does not schedule them.
 
 Each enrichment DAG writes a full release to `s3://<data-bucket>/{dag_id}/{run_id}/full/` and a diff against the latest usable earlier published release to `{dag_id}/{run_id}/diff/`. When no suitable earlier release exists, only the full release is produced. Enrichment or diff failures prevent the run from being recorded and published.
 
@@ -28,53 +30,77 @@ Heavier processing runs as AWS Batch jobs. The general pattern is to store input
 
 Each DAG is created by a factory function in the `comet` package. The DAGs bucket holds a small `dags.py` entry point and a `dags.yaml` file with one entry per DAG instance; a new DAG is added by appending an entry to the YAML file (see [dags.md](dags.md)).
 
+The factory code is installed in the Airflow image. The S3 DAG bundle downloads the entry point and YAML into a local directory, with a 60-second refresh interval configured for the API server, scheduler, and DAG processor. Workers download their own copy at startup and use a one-day refresh interval. These files must stay compatible with the deployed image.
+
 Enrichment rules are maintained in `comet-enrich`, stored under the data bucket's `enrichment-configs/` prefix, and downloaded by Batch jobs at runtime. The infrastructure deployment does not manage these objects. Each enrichment record contains the DOI name of its enrichment project, such as `10.1234/example`, in `sourceId`; the DAG passes this value to `comet-enrich`.
 
 The arXiv TeX extraction pipeline has not been moved to Airflow yet; it is run manually on the dev EC2 instance (see [arxiv-pipeline.md](arxiv-pipeline.md)). The dev instance is managed by an Auto Scaling Group that defaults to zero instances and is started on demand; a scheduled action shuts it down nightly (see [setup.md](setup.md)).
 
 ## Apache Airflow
 
-The Airflow services run as four independent ECS Fargate services, each its own task definition and service. Running them separately lets ECS restart a failed component without affecting the others. The components do not call each other; they coordinate through the metadata database.
+The Airflow services run as four independent ECS Fargate services, each with its own task definition. ECS can restart a failed component separately. The metadata database coordinates orchestration, and the API server provides the Task Execution API used by workers; service networking also permits internal API traffic.
 
 ![Airflow](img/airflow.png)
 
 The four services and the init task:
 
-* `init`: a one-off Fargate task that runs `airflow db migrate` and `airflow fab-db migrate`, then exits. If the Fernet key is set to `NEW,OLD` for rotation, it also runs `airflow rotate-fernet-key` to re-encrypt stored connections and variables. A `before_launch` hook on the services stack runs this task and waits for it to succeed before deploying the services, so the schema is always migrated first.
+* `init`: a one-off Fargate task that runs `airflow db migrate` and `airflow fab-db migrate`, and handles [Fernet key rotation](setup.md#rotating-the-fernet-key) when configured. A `before_launch` hook on the services stack waits for it to succeed before deploying the services.
 * `api-server`: the UI and the Task Execution API that workers use.
 * `scheduler`: triggers DAG runs and dispatches tasks.
 * `dag-processor`: parses the DAG bundle from the DAGs bucket.
-* `triggerer`: runs deferrable operators.
+* `triggerer`: runs triggers while tasks are deferred; operators execute and resume in workers.
 
-The scheduler uses the [AWS ECS Executor](https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/executors/ecs-executor.html) to run each Airflow task as a one-off Fargate task that exits when the task finishes. Workers are not given any secrets; they read connections, variables, and state through the Task Execution API. Batch jobs are submitted with the `BatchOperator` in deferrable mode, which lets Airflow submit a job and wait for it to complete without using a worker while the job runs.
+Current task sizing:
 
-Slack notifications use the `slack_default` connection supplied to Fargate workers through their environment. Failures and progress updates are task callbacks; deadline notifications launch a separate worker with `SyncCallback`.
+| Component | vCPU | Memory |
+|-----------|------|--------|
+| API server, scheduler, DAG processor (each) | 0.25 | 0.5 GiB |
+| Triggerer | 0.25 | 1 GiB |
+| Worker (default) | 1 | 2 GiB |
+
+The scheduler uses the [AWS ECS Executor](https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/executors/ecs-executor.html) to run each Airflow task as a one-off Fargate task. Workers are not provisioned with database credentials, the Fernet key, or the execution-API signing key; they access connections, variables, and orchestration state through the Task Execution API. The Slack connection is an exception, injected as `AIRFLOW_CONN_SLACK_DEFAULT`.
+
+Workers submit Batch jobs with `BatchOperator` in deferrable mode, then exit while the triggerer polls job status. Completion launches a worker to resume the operator, so no worker stays occupied for the Batch job's lifetime.
+
+Slack notifications cover task failures, selected task-success/progress events, and deadlines measured from when a DAG run is queued. Deadline notifications launch a separate worker with `SyncCallback`.
 
 The deployment also relies on several supporting AWS services:
 
 * RDS PostgreSQL stores the Airflow metadata database.
 * S3 stores the DAG bundle and task logs.
 * Secrets Manager stores the Fernet key, database credentials, admin password, the JWT secret for the Task Execution API, and the API server session signing key.
-* CloudWatch stores container logs.
+* CloudWatch stores Airflow service, worker, and Batch container logs with 14-day retention. Airflow task logs are stored separately in S3 and expire after 365 days. See [Logs](setup.md#logs).
 
-Inbound traffic from the internet is blocked; the UI is accessed by port-forwarding into the api-server task with `scripts/airflow-ui.sh` (see [Open the Airflow UI](setup.md#open-the-airflow-ui)).
+The UI uses the FAB authentication manager. Inbound traffic from the internet is blocked; `scripts/airflow-ui.sh` uses Session Manager to port-forward into the ECS Exec-enabled api-server task. See [Open the Airflow UI](setup.md#open-the-airflow-ui) for access and login instructions.
 
 ## AWS Batch
 
-Fargate supports up to 16 vCPU, 120 GiB of memory, and 200 GiB of ephemeral disk, which is not enough for the heavier enrichment jobs. AWS Batch allows larger compute resources to be used when required, whilst only paying for that compute while jobs are running.
+AWS Batch runs the heavier jobs on EC2 instance families selected for their CPU, memory, and fast local NVMe storage. Compute environments can scale to zero when idle.
 
-There is one job queue per compute environment, and each compute environment uses a single instance type, sized so that one job nearly fills the instance. This stops Batch from scheduling two jobs onto the same instance. A launch template mounts the instance NVMe disks at `/data` (RAID0 when there are two disks).
+There are five queues, each with its own compute environment and one allowed instance type:
+
+| Queue / compute environment workload | Instance type |
+|--------------------------------------|---------------|
+| `download` | `m6id.xlarge` |
+| `publish` | `c5ad.2xlarge` |
+| `enrich-resource-type-general` | `c5ad.4xlarge` |
+| `enrich-funders` | `c5ad.8xlarge` |
+| `enrich-affiliations` | `c5ad.8xlarge` |
+
+Job resource requests are sized so that one job nearly fills the instance to avoid contention. A launch template mounts the instance NVMe disks at `/data` (RAID0 when there are two disks).
 
 ![AWS Batch](img/aws-batch.png)
 
-Four job definitions:
+The queues use four reusable job definitions:
 
 * `download-datacite`: copies the DataCite snapshot to S3. It has its own execution role because ECS injects the DataCite credentials from Secrets Manager.
 * `enrich`: generic single-container CPU enrichment, such as resource type reclassification.
-* `enrich-with-ror`: a [single-node multi-container job](https://docs.aws.amazon.com/batch/latest/userguide/create-job-definition-single-node-multi-container.html) used by the funders and affiliations enrichments. It runs an OpenSearch container, a [Marple](https://gitlab.com/crossref/labs/marple) container that seeds the ROR index, and the main container, which waits until Marple reports ready before running the enrichment binary.
+* `enrich-with-ror`: a [single-node multi-container job](https://docs.aws.amazon.com/batch/latest/userguide/create-job-definition-single-node-multi-container.html) used by the funders and affiliations enrichments. Container `START` dependencies set the launch order. Application checks then make [Marple](https://gitlab.com/crossref/labs/marple) wait for OpenSearch readiness and load the selected ROR release before serving requests; the main container waits for Marple's health endpoint before running enrichment.
 * `publish`: copies enrichment releases from the data bucket to the Hugging Face bucket. It has its own execution role because ECS injects the Hugging Face credentials from Secrets Manager.
 
 When an Airflow task starts a Batch job, the `BatchOperator` supplies the command and CPU and memory requirements for that run. This lets several tasks reuse the same job definitions. It also tags each job with its environment and service so it can be identified with the rest of the deployment.
+
+Single-container Batch output is also copied into Airflow task logs, but not multi-container yet.
 
 ## Networking and security
 
@@ -84,22 +110,27 @@ There are four security groups, one for each group of resources. None of them ac
 
 ![Networking](img/networking.png)
 
-* `services` contains the four Airflow Fargate services, the only resources with access to the Airflow secrets: the database credentials, Fernet key, JWT secret, API session signing key, and admin password. The only inbound rules are port 8080 from `jobs` for the Task Execution API, and port 8080 from itself so the components can reach the api-server. The services have no public IPs; they sit in the private subnet and reach AWS only through the VPC endpoints.
+* `services` contains the four Airflow Fargate services and the one-off init task. Airflow's database credentials, Fernet key, JWT secret, API session signing key, and admin password are injected into tasks in this group as required. The only inbound rules are port 8080 from `jobs` for the Task Execution API, and port 8080 from itself so the components can reach the api-server. These tasks have no public IPs; they sit in the private subnet and reach AWS only through the VPC endpoints.
 * `jobs` contains the Fargate workers, Batch instances, and the dev instance, and has no inbound rules. They all have public IPs because they download external data.
 * `endpoints` accepts 443 from `services` and `jobs`.
-* `rds` accepts 5432 from `services` only. Workers and Batch jobs cannot connect to the database; they read and write state through the api-server.
+* `rds` accepts 5432 from `services` only. Workers and Batch jobs cannot connect to the database. Airflow workers use the execution API for orchestration state; Batch applications access S3 and, where needed, DynamoDB directly.
 
-The VPC endpoints are: S3 (a free gateway endpoint, also used for ECR image layers), ECR (image pulls), Secrets Manager, CloudWatch Logs, ECS (used by the scheduler to launch Fargate workers), Batch (used by the triggerer to poll job status), and SSM messages (used by ECS Exec for the UI port-forward).
+Cloud Map registers the API server under the private hostname `api-server.comet.local`. Workers connect to `http://api-server.comet.local:8080/execution/` within the VPC.
+
+The seven interface endpoints are ECR API (`ecr.api`), ECR Docker (`ecr.dkr`), Secrets Manager, CloudWatch Logs, ECS (scheduler worker launches), Batch (triggerer status polling), and SSM messages (ECS Exec and UI port-forwarding). S3 uses a separate free gateway endpoint, also used for ECR image layers. The workstation connects through AWS's public Session Manager service; it does not directly access the private VPC endpoint.
+
+Task roles grant AWS permissions to application code. Execution roles grant the ECS agent permissions for image pulls, logs, and secret injection. Airflow services and workers have separate task and execution roles. Batch application containers share one job role with access to the data bucket and release table; download and publish use separate execution roles to inject their respective credentials.
 
 ## Container images
 
-| Image           | Built from           | Runs on                                         |
-|-----------------|----------------------|-------------------------------------------------|
+| Image           | Built from / registry | Runs on                                        |
+|-----------------|-----------------------|------------------------------------------------|
 | `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs and the dev EC2 arXiv pipeline   |
 | `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs    |
 | `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers            |
+| OpenSearch | `public.ecr.aws/opensearchproject/opensearch:2.17.1` | The OpenSearch container in enrich-with-ror jobs |
 
-Images are stored in ECR, selected for deployment by an image tag stored in SSM, and pinned to sha256 digests at deploy time. Main builds use `sha-*` tags; a release tag labels the existing images without rebuilding them. See [setup.md](setup.md#image-builds-and-releases) for the build and deployment procedure.
+The three COMET images are built for `linux/amd64` (x86-64), stored in ECR, selected by an image tag in SSM, and resolved to sha256 digests at deploy time. See [Image builds and releases](setup.md#image-builds-and-releases) for build, tagging, and deployment procedures.
 
 ## Deployment permissions
 
@@ -111,11 +142,13 @@ The permissions boundary is attached to every IAM role created by the environmen
 
 ## Monitoring and cost alerts
 
+Alarms and budgets notify operators; they do not enforce spending caps or stop work.
+
 ### Alarms
 
 * CloudWatch Logs: alarm when log ingestion exceeds the per-five-minute byte threshold in at least two of the last four periods.
 * S3: alarm when combined storage across the four project buckets exceeds the configured threshold.
-* AWS Config: alarm when the number of configuration items recorded in an hour exceeds the threshold. The count covers every resource that Config records in the region, not only COMET's.
+* AWS Config: alarm when the number of configuration items recorded in an hour exceeds the threshold. This is a regional count of recorded items across all resource types, not a count of distinct COMET resources.
 * RDS: forward low-storage and configuration-change events to the monitoring SNS topic.
 * EC2 and Fargate worker tasks:
   * Alarm when tasks exceeds the age threshold for two consecutive five-minute periods.
@@ -126,6 +159,7 @@ The permissions boundary is attached to every IAM role created by the environmen
 * AWS Lambda: alarm when the monitoring function is invoked more than twice in a five-minute period.
 
 ### Cost budgets
+
 * Track monthly amortized costs, alerting at 75%, 90%, and 100% of actual spend and 100% of forecast spend.
 * Track monthly internet egress, alerting at 50%, 75%, and 100% of actual usage and 100% of forecast usage.
 * Track monthly AWS Config and CloudWatch spend in the deployment region, alerting at 50%, 75%, and 100% of actual spend and 100% of forecast spend.
@@ -145,11 +179,3 @@ Endpoint data processing counts toward `platform`, including traffic caused by j
 ### Notifications
 
 Monitoring notifications are delivered to every address in the `alert_emails` list in `vars-dev.yaml`; at least one address is required. CloudWatch alarms, RDS events, and AWS Budgets publish to the monitoring SNS topic, which forwards notifications to those addresses.
-
-## Future work
-
-Things to consider before using this stack in production:
-
-* Subscribe the monitoring alerts SNS topic to Slack.
-* Enable Container Insights on the ECS cluster for per-task CPU/memory metrics.
-* Could enable UI access via an internal ALB with SSO.

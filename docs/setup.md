@@ -214,10 +214,7 @@ Create a Slack channel for the alerts:
 4. Select **Add New Webhook to Workspace**, choose the alert channel, and authorize it.
 5. Copy the generated `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` URL.
 
-Then store the webhook in the `comet-dev-airflow-slack-webhook` secret created by `make secrets`. The
-Airflow workers read the `slack_default` connection from this secret. Every Slack message is sent
-from a worker, and deadline callbacks run with a restricted Execution API token that cannot read
-connections from the metadata database, so the connection must resolve from the environment instead.
+Then store the webhook in the `comet-dev-airflow-slack-webhook` secret created by `make secrets`. ECS injects it into Fargate workers as `AIRFLOW_CONN_SLACK_DEFAULT`, providing the `slack_default` connection.
 
 In the Secrets Manager console, set the secret's value on the **Plaintext** tab to the connection as JSON:
 
