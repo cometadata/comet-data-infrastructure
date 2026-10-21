@@ -115,6 +115,8 @@ There are four security groups, one for each group of resources. None of them ac
 * `endpoints` accepts 443 from `services` and `jobs`.
 * `rds` accepts 5432 from `services` only. Workers and Batch jobs cannot connect to the database. Airflow workers use the execution API for orchestration state; Batch applications access S3 and, where needed, DynamoDB directly.
 
+Outbound access is restricted: `services` allows 443 to endpoints and S3, 5432 to RDS, and 8080 to itself. `jobs` allows outbound HTTP/HTTPS and 8080 to services, with explicit HTTPS rules for endpoints and S3. The endpoints and RDS groups have only loopback placeholder rules.
+
 Cloud Map registers the API server under the private hostname `api-server.comet.local`. Workers connect to `http://api-server.comet.local:8080/execution/` within the VPC.
 
 The seven interface endpoints are ECR API (`ecr.api`), ECR Docker (`ecr.dkr`), Secrets Manager, CloudWatch Logs, ECS (scheduler worker launches), Batch (triggerer status polling), and SSM messages (ECS Exec and UI port-forwarding). S3 uses a separate free gateway endpoint, also used for ECR image layers. The workstation connects through AWS's public Session Manager service; it does not directly access the private VPC endpoint.
