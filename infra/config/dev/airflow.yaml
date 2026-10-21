@@ -26,7 +26,7 @@ parameters:
   LogsBucketArn: !stack_output dev/s3.yaml::AirflowLogsBucketARN
   DataBucketArn: !stack_output dev/s3.yaml::DataBucketARN
   DbCredentialsSecretArn: !stack_output dev/rds.yaml::DbCredentialsSecretArn
-  # Created outside CloudFormation; see docs/airflow.md.
+  # Created outside CloudFormation; see docs/setup.md#rotating-the-fernet-key.
   FernetSecretArn: "{{ var.fernet_secret_arn }}"
   # Created outside CloudFormation; see docs/setup.md.
   SlackWebhookSecretArn: "{{ var.slack_webhook_secret_arn }}"

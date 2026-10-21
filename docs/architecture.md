@@ -18,7 +18,7 @@ Release records track these locations and the diff's baseline. Publishing checks
 
 A published release can be replaced using the `replace_published` trigger parameter. The new run is marked for publication and overwrites the existing export folders. See [Re-running a published release](setup.md#re-running-a-published-release).
 
-Publishing DAGs run after their enrichment assets are updated. When the selected enrichments have the same release date, the DAG copies their `full/` and any `diff/` directories to a Hugging Face S3-compatible bucket, records them as published, and uploads the release index. See [enrichment-data.md](enrichment-data.md) for how to access the published files.
+The publication DAG runs when any enrichment asset is updated. When the selected enrichments have the same release date, it copies their `full/` and any `diff/` directories to a Hugging Face S3-compatible bucket, records them as published, and uploads the release index. See [enrichment-data.md](enrichment-data.md) for how to access the published files.
 
 The `prune_releases` DAG runs monthly. It retains the configured number of source and published enrichment releases. Unpublished enrichment outputs remain until a newer publication supersedes them.
 
@@ -26,7 +26,9 @@ Untracked prefixes become eligible after the configured grace period. Release re
 
 ![Dataflow](img/dataflow.png)
 
-Heavier processing runs as AWS Batch jobs. The general pattern is to store input and output data in S3: each job downloads the data it needs to local NVMe disk, processes it, uploads the results back to S3, and exits. [s5cmd](https://github.com/peak/s5cmd) is used for the transfers because it is significantly faster than the AWS CLI for large transfers and workloads involving many files. Each job writes to an S3 path that includes the Airflow run ID, and deletes anything already at that path before it starts, so jobs can be re-run safely and don't rely on local state or a specific instance.
+Solid arrows between DAGs and assets show scheduling events; dashed arrows show data dependencies. ROR is an input to funders and affiliations, but updates to its asset do not trigger those DAGs.
+
+Heavier processing runs as AWS Batch jobs. Jobs download input from S3 to local NVMe disk, process it, upload the results, and exit. [s5cmd](https://github.com/peak/s5cmd) handles bulk transfers because it is significantly faster than the AWS CLI for large transfers and workloads involving many files. Ingestion, enrichment, and diff outputs use S3 paths containing the Airflow run ID; retries replace the relevant output directory. Publication stages those outputs locally and copies them to release-date paths in the Hugging Face bucket, then updates `datacite/index.json`.
 
 Each DAG is created by a factory function in the `comet` package. The DAGs bucket holds a small `dags.py` entry point and a `dags.yaml` file with one entry per DAG instance; a new DAG is added by appending an entry to the YAML file (see [dags.md](dags.md)).
 
@@ -67,7 +69,7 @@ Slack notifications cover task failures, selected task-success/progress events, 
 The deployment also relies on several supporting AWS services:
 
 * RDS PostgreSQL stores the Airflow metadata database.
-* S3 stores the DAG bundle and task logs.
+* S3 stores source data and enrichment outputs, the DAG bundle, task logs, and build artifacts in four separate buckets.
 * Secrets Manager stores the Fernet key, database credentials, admin password, the JWT secret for the Task Execution API, and the API server session signing key.
 * CloudWatch stores Airflow service, worker, and Batch container logs with 14-day retention. Airflow task logs are stored separately in S3 and expire after 365 days. See [Logs](setup.md#logs).
 
@@ -98,13 +100,15 @@ The queues use four reusable job definitions:
 * `enrich-with-ror`: a [single-node multi-container job](https://docs.aws.amazon.com/batch/latest/userguide/create-job-definition-single-node-multi-container.html) used by the funders and affiliations enrichments. Container `START` dependencies set the launch order. Application checks then make [Marple](https://gitlab.com/crossref/labs/marple) wait for OpenSearch readiness and load the selected ROR release before serving requests; the main container waits for Marple's health endpoint before running enrichment.
 * `publish`: copies enrichment releases from the data bucket to the Hugging Face bucket. It has its own execution role because ECS injects the Hugging Face credentials from Secrets Manager.
 
+Diff tasks reuse the single-container `enrich` job definition on the corresponding enrichment method's queue.
+
 When an Airflow task starts a Batch job, the `BatchOperator` supplies the command and CPU and memory requirements for that run. This lets several tasks reuse the same job definitions. It also tags each job with its environment and service so it can be identified with the rest of the deployment.
 
 Single-container Batch output is also copied into Airflow task logs, but not multi-container yet.
 
 ## Networking and security
 
-The VPC has a public subnet with an internet gateway for the Airflow Fargate jobs and the AWS Batch jobs. The VPC also has a private subnet for the Airflow services and the RDS metadata database. The private subnet has no route to the internet: the services reach the AWS APIs they need through VPC interface endpoints, and reach S3 through the free gateway endpoint. Whilst the Airflow services and the RDS metadata database have public access disabled in CloudFormation, the private subnet acts as a second layer of defense.  Everything is deployed into a single availability zone. A second private subnet in another AZ exists only to satisfy the RDS two-AZ requirement; nothing runs in it.
+The public subnet has an internet gateway for Fargate workers, Batch instances, and the dev instance. Airflow services and RDS run in a private subnet with no public IPs or internet default route. They reach AWS APIs through interface endpoints and S3 through a gateway endpoint.
 
 There are four security groups, one for each group of resources. None of them accept traffic from outside the VPC; the UI and shell access go through SSM, which only needs outbound access.
 
@@ -115,11 +119,11 @@ There are four security groups, one for each group of resources. None of them ac
 * `endpoints` accepts 443 from `services` and `jobs`.
 * `rds` accepts 5432 from `services` only. Workers and Batch jobs cannot connect to the database. Airflow workers use the execution API for orchestration state; Batch applications access S3 and, where needed, DynamoDB directly.
 
-Outbound access is restricted: `services` allows 443 to endpoints and S3, 5432 to RDS, and 8080 to itself. `jobs` allows outbound HTTP/HTTPS and 8080 to services, with explicit HTTPS rules for endpoints and S3. The endpoints and RDS groups have only loopback placeholder rules.
+Outbound access is restricted: `services` allows 443 to endpoints and the S3 managed prefix list, 5432 to RDS, and 8080 to itself. `jobs` allows outbound HTTP/HTTPS and 8080 to services, with explicit HTTPS rules for endpoints and S3. The endpoints and RDS groups have only loopback placeholder rules. Security groups allow return traffic for established connections.
 
 Cloud Map registers the API server under the private hostname `api-server.comet.local`. Workers connect to `http://api-server.comet.local:8080/execution/` within the VPC.
 
-The seven interface endpoints are ECR API (`ecr.api`), ECR Docker (`ecr.dkr`), Secrets Manager, CloudWatch Logs, ECS (scheduler worker launches), Batch (triggerer status polling), and SSM messages (ECS Exec and UI port-forwarding). S3 uses a separate free gateway endpoint, also used for ECR image layers. The workstation connects through AWS's public Session Manager service; it does not directly access the private VPC endpoint.
+The seven interface endpoints are ECR API (`ecr.api`), ECR Docker (`ecr.dkr`), Secrets Manager, CloudWatch Logs, ECS (scheduler worker launches), Batch (triggerer status polling), and SSM messages (ECS Exec and UI port-forwarding). Their network interfaces are in a private subnet. S3 uses a separate free gateway endpoint associated with both the public and private route tables, also used for ECR image layers. The workstation connects through AWS's public Session Manager service; it does not directly access the private VPC endpoint.
 
 Task roles grant AWS permissions to application code. Execution roles grant the ECS agent permissions for image pulls, logs, and secret injection. Airflow services and workers have separate task and execution roles. Batch application containers share one job role with access to the data bucket and release table; download and publish use separate execution roles to inject their respective credentials.
 
@@ -132,7 +136,9 @@ Task roles grant AWS permissions to application code. Execution roles grant the 
 | `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers            |
 | OpenSearch | `public.ecr.aws/opensearchproject/opensearch:2.17.1` | The OpenSearch container in enrich-with-ror jobs |
 
-The three COMET images are built for `linux/amd64` (x86-64), stored in ECR, selected by an image tag in SSM, and resolved to sha256 digests at deploy time. See [Image builds and releases](setup.md#image-builds-and-releases) for build, tagging, and deployment procedures.
+The COMET names in the table are local build names. Their private ECR repositories are `comet-<env>-batch`, `comet-<env>-marple`, and `comet-<env>-airflow`. The separate `comet-<env>-buildcache` repository stores BuildKit cache layers, not a runtime image. OpenSearch is pulled from public ECR.
+
+The three COMET images are built for `linux/amd64` (x86-64), selected by an image tag in SSM, and resolved to sha256 digests at deploy time. See [Image builds and releases](setup.md#image-builds-and-releases) for build, tagging, and deployment procedures.
 
 ## Deployment permissions
 
