@@ -1,0 +1,16 @@
+[global]
+include = ["README.md", "docs/**/*.md"]
+# Superpowers specs and plans are working documents, not published docs.
+exclude = ["docs/superpowers/**"]
+respect-gitignore = true
+
+[MD013]
+line-length = 100
+tables = false
+code-blocks = false
+# make fmt rewraps paragraphs and list items to fit.
+reflow = true
+reflow-mode = "normalize"
+
+[MD004]
+style = "dash"

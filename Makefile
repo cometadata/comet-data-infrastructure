@@ -196,15 +196,18 @@ clean:
 
 fmt:
 > $(UV_RUN) --only-group lint ruff format $(RUFF_PATHS)
+> $(UV_RUN) --only-group lint rumdl fmt
 
 fmt-ci:
 > $(UV_RUN) --only-group lint ruff format --check $(RUFF_PATHS)
 
 lint:
 > $(UV_RUN) --only-group lint ruff check $(RUFF_PATHS) --fix
+> $(UV_RUN) --only-group lint rumdl check
 
 lint-ci:
 > $(UV_RUN) --only-group lint ruff check $(RUFF_PATHS)
+> $(UV_RUN) --only-group lint rumdl check
 
 test:
 > $(UV_RUN) --extra airflow --group test pytest

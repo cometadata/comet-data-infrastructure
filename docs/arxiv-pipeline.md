@@ -1,19 +1,16 @@
 # Running arXiv batch extraction on EC2
 
-Start the dev instance with `make dev-up` and get its instance ID from
-`make dev-status` (see [setup.md](setup.md)). For runs that go past the
-nightly shutdown, run `make dev-keepalive` first and
-`make dev-autostop` when the run is done: the shutdown terminates the
-instance, which wipes `/data` and the local resume state.
+Start the dev instance with `make dev-up` and get its instance ID from `make dev-status` (see
+[setup.md](setup.md)). For runs that go past the nightly shutdown, run `make dev-keepalive` first
+and `make dev-autostop` when the run is done: the shutdown terminates the instance, which wipes
+`/data` and the local resume state.
 
-Connect to the instance via SSM, then pull and run the Docker
-image. The `/data` directory is the NVMe mount on the instance; the
-pipeline writes under `/data/arxiv/<release-date>/` by default.
+Connect to the instance via SSM, then pull and run the Docker image. The `/data` directory is the
+NVMe mount on the instance; the pipeline writes under `/data/arxiv/<release-date>/` by default.
 
-Set the bucket, release date, and image env vars up front: the commands
-below reference them. Images are tagged `sha-<short-commit>` or with a
-release version (see [Image builds and releases](setup.md#image-builds-and-releases));
-normally use the promoted tag:
+Set the bucket, release date, and image env vars up front: the commands below reference them. Images
+are tagged `sha-<short-commit>` or with a release version (see
+[Image builds and releases](setup.md#image-builds-and-releases)); normally use the promoted tag:
 
 ```bash
 export BUCKET="<your-s3-data-bucket>"
@@ -38,8 +35,8 @@ nohup docker run --rm \
 tail -f "/data/arxiv-pipeline-${RELEASE_DATE}.log"
 ```
 
-Omitting `--cpus` lets the container use all host CPUs. For a memory stress
-check, use `--sort-order largest` to process the biggest tars first.
+Omitting `--cpus` lets the container use all host CPUs. For a memory stress check, use
+`--sort-order largest` to process the biggest tars first.
 
 ## Full run
 
@@ -51,15 +48,14 @@ nohup docker run --rm \
   > "/data/arxiv-pipeline-${RELEASE_DATE}.log" 2>&1 &
 ```
 
-Default `--batch-size` is 500 and default `--sort-order` is
-`chronological`; override with `--batch-size N` or
-`--sort-order {largest,smallest}`.
+Default `--batch-size` is 500 and default `--sort-order` is `chronological`; override with
+`--batch-size N` or `--sort-order {largest,smallest}`.
 
 ## Layout
 
 Each batch runs in its own self-contained folder. Local:
 
-```
+```text
 /data/arxiv/${RELEASE_DATE}/
   state.json
   arXiv_src_manifest.xml(+ .etag)
@@ -76,29 +72,24 @@ Each batch runs in its own self-contained folder. Local:
 
 S3:
 
-```
+```text
 s3://${BUCKET}/arxiv/${RELEASE_DATE}/
   state.json
   results/<YYYY>/<file>   # merged across all batches
 ```
 
-The `<YYYY>/` subdirectories keep the per-directory file count bounded
-so the release can be published as a HuggingFace dataset without
-hitting the platform's per-folder limits.
+The `<YYYY>/` subdirectories keep the per-directory file count bounded so the release can be
+published as a HuggingFace dataset without hitting the platform's per-folder limits.
 
-By default each `batch_NNNNN/` folder is deleted after its checkpoint
-advances; pass `--no-cleanup` to keep the folders on disk for
-inspection.
+By default each `batch_NNNNN/` folder is deleted after its checkpoint advances; pass `--no-cleanup`
+to keep the folders on disk for inspection.
 
 ## Resuming
 
-Progress is tracked in `/data/arxiv/${RELEASE_DATE}/state.json` and
-mirrored to `s3://${BUCKET}/arxiv/${RELEASE_DATE}/state.json`. Re-run
-the same command and the pipeline continues from the next unprocessed
-batch, skipping already-uploaded results.
+Progress is tracked in `/data/arxiv/${RELEASE_DATE}/state.json` and mirrored to
+`s3://${BUCKET}/arxiv/${RELEASE_DATE}/state.json`. Re-run the same command and the pipeline
+continues from the next unprocessed batch, skipping already-uploaded results.
 
-Resume requires these flags to match the prior run: `--batch-size`,
-`--sort-order`, `--shuffle-seed`. The pipeline also re-verifies the
-S3 manifest's ETag, so if the manifest has changed or any resume key
-differs the run errors out and names the files to delete to start
-over.
+Resume requires these flags to match the prior run: `--batch-size`, `--sort-order`,
+`--shuffle-seed`. The pipeline also re-verifies the S3 manifest's ETag, so if the manifest has
+changed or any resume key differs the run errors out and names the files to delete to start over.

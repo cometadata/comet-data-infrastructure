@@ -1,18 +1,22 @@
 # DAGs
 
-DAGs are config-driven: each DAG is a factory function in the comet package, instantiated from a YAML entry in the DAGs bucket.
+DAGs are config-driven: each DAG is a factory function in the comet package, instantiated from a
+YAML entry in the DAGs bucket.
 
 ## Bucket layout
 
-```
+```text
 s3://<stackname>-airflow-dags/
   dags.py     # dag-processor entry point
   dags.yaml   # one entry per DAG instance
 ```
 
-The S3 DAG bundle downloads both files into a local directory, where `dags.py` reads its sibling `dags.yaml`. The API server, scheduler, and DAG processor use a 60-second bundle refresh interval. Workers download their own copy at startup and use a one-day refresh interval.
+The S3 DAG bundle downloads both files into a local directory, where `dags.py` reads its sibling
+`dags.yaml`. The API server, scheduler, and DAG processor use a 60-second bundle refresh interval.
+Workers download their own copy at startup and use a one-day refresh interval.
 
-The bucket is versioned, so earlier files can be recovered while their S3 object versions are retained.
+The bucket is versioned, so earlier files can be recovered while their S3 object versions are
+retained.
 
 ## Add a DAG instance
 
@@ -36,7 +40,11 @@ Set `enabled: false` on an entry to skip it without removing it.
 
 ## Writing a factory
 
-A factory is a plain function in the `comet.dags` package with the signature `(dag_id: str, params: <BaseDagParams subclass>) -> DAG`. The loader discovers the params class from the type annotation; no decorator or registration. `BaseDagParams` provides `start_date`, `end_date`, `catchup`, `tags`, `max_active_runs`, and `deadline_minutes`, with `extra='forbid'` so a typo in the YAML fails at parse time.
+A factory is a plain function in the `comet.dags` package with the signature
+`(dag_id: str, params: <BaseDagParams subclass>) -> DAG`. The loader discovers the params class from
+the type annotation; no decorator or registration. `BaseDagParams` provides `start_date`,
+`end_date`, `catchup`, `tags`, `max_active_runs`, and `deadline_minutes`, with `extra='forbid'` so a
+typo in the YAML fails at parse time.
 
 ```python
 # src/comet/dags/my_dag.py
@@ -58,19 +66,28 @@ def create_my_dag(dag_id: str, params: MyDagParams) -> DAG:
 
 The reference implementation is `src/comet/dags/ror_ingest.py`.
 
-`deadline_minutes` defaults to 90 and starts when the DAG run is queued. `alert_kwargs(...)` adds task-failure and deadline notifications. For status messages, add a `slack_notifier(...)` success callback to a task; skipped tasks do not notify. See `src/comet/dags/ror_ingest.py` for an example.
+`deadline_minutes` defaults to 90 and starts when the DAG run is queued. `alert_kwargs(...)` adds
+task-failure and deadline notifications. For status messages, add a `slack_notifier(...)` success
+callback to a task; skipped tasks do not notify. See `src/comet/dags/ror_ingest.py` for an example.
 
 ## Failure behaviour
 
-- The loader attempts every entry. If any fail (bad factory path, params validation error, exception in the factory, duplicate `dag_id`), it raises one `DagLoadError` at the end wrapping every failure, each annotated with its `dag_id` and factory. All the errors show up together as a single import error in the Airflow UI rather than just the first one.
-- Because the module fails to parse, one bad entry takes all the DAGs down. Fix the entry or set `enabled: false` on it.
+- The loader attempts every entry. If any fail (bad factory path, params validation error, exception
+  in the factory, duplicate `dag_id`), it raises one `DagLoadError` at the end wrapping every
+  failure, each annotated with its `dag_id` and factory. All the errors show up together as a single
+  import error in the Airflow UI rather than just the first one.
+- Because the module fails to parse, one bad entry takes all the DAGs down. Fix the entry or set
+  `enabled: false` on it.
 - Malformed YAML or unknown top-level keys fail immediately.
-- A missing `dags.yaml` logs a warning and parses green; the DAGs appear once the next refresh delivers it.
-- The loader uses Airflow's parsing context, so running a single task only builds that DAG's entry — a broken entry elsewhere in the YAML doesn't stop in-flight tasks of other DAGs.
+- A missing `dags.yaml` logs a warning and parses green; the DAGs appear once the next refresh
+  delivers it.
+- The loader uses Airflow's parsing context, so running a single task only builds that DAG's entry —
+  a broken entry elsewhere in the YAML doesn't stop in-flight tasks of other DAGs.
 
 ## Worker sizing
 
-Each Airflow task runs as a Fargate worker (1 vCPU / 2 GiB memory / 20 GiB disk by default). CPU and memory can be overridden per task:
+Each Airflow task runs as a Fargate worker (1 vCPU / 2 GiB memory / 20 GiB disk by default). CPU and
+memory can be overridden per task:
 
 ```python
 from airflow.sdk import task
@@ -80,4 +97,5 @@ from airflow.sdk import task
 def heavy_task(): ...
 ```
 
-Ephemeral storage can't be overridden at runtime. Jobs that need more than 20 GiB of scratch belong on AWS Batch.
+Ephemeral storage can't be overridden at runtime. Jobs that need more than 20 GiB of scratch belong
+on AWS Batch.
