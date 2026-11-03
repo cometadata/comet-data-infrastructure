@@ -22,7 +22,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/peak/s5cmd/v2 v2.3.0 // indirect
-	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/termie/go-shutil v0.0.0-20140729215957-bcacb06fecae // indirect
 	github.com/urfave/cli/v2 v2.11.2 // indirect
