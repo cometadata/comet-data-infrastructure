@@ -43,7 +43,7 @@ notebooks = [
 airflow = [
     "apache-airflow-providers-amazon[aiobotocore]>=9.34.0",
     "apache-airflow-providers-slack>=9.10.2,<10",
-    "apache-airflow[amazon,fab,postgres,standard]==3.3.1",
+    "apache-airflow[amazon,fab,postgres,standard]==3.4.0rc2",
 ]
 
 [project.scripts]

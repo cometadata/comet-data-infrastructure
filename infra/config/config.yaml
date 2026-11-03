@@ -9,7 +9,7 @@ stack_tags_inheritance: merge
 # Versions of what CloudFormation deploys. Versions built into the images are in versions.env.
 versions:
   # Must match the OpenSearch client in Marple (MARPLE_SHA in versions.env).
-  opensearch: 2.17.1
+  opensearch: 3.9.0
   postgres: '17'
   lambda_python: python3.13
   # Docker CLI plugins installed on the dev instance.

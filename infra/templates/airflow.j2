@@ -62,6 +62,9 @@
 {%- endmacro %}
 {#- Airflow + AWS env shared by every service container. #}
 {%- macro common_env(api_base_url) %}
+            # Airflow 3.4 defaults to one Dag run per asset event; batch queued events into one run.
+            - Name: AIRFLOW__SCHEDULER__BATCH_ASSET_EVENTS
+              Value: 'True'
             - Name: AIRFLOW__CORE__AUTH_MANAGER
               Value: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
             - Name: AIRFLOW__CORE__LOAD_EXAMPLES

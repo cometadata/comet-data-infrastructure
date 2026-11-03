@@ -13,6 +13,7 @@ ARG S5CMD_VERSION
 ENV UV_LINK_MODE=copy
 
 USER root
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 # comet uses /data as its working dir.
 RUN mkdir -p /data && chown airflow:0 /data
 # comet shells out to s5cmd to copy files to and from S3.
