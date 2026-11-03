@@ -15,3 +15,7 @@ versions:
   # Docker CLI plugins installed on the dev instance.
   docker_compose: 5.4.0
   docker_buildx: 0.35.0
+
+# AWS's public SSM parameter with the latest ECS-optimized AL2023 AMI. Batch moves onto it at each deploy,
+# and the monitor alarms when Batch is behind it.
+latest_ami_parameter: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id

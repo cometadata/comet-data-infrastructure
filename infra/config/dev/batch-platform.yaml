@@ -13,6 +13,8 @@ parameters:
   # Single AZ to match the rest of the stack.
   SubnetId: !stack_attr sceptre_user_data.public_subnet
   SecurityGroupId: !stack_output dev/security-groups.yaml::JobsSecurityGroupId
+  # AWS's latest ECS-optimized AL2023 AMI, read at each deploy, so a deploy moves Batch onto it.
+  BatchImageId: !ssm {{ stack_group_config.latest_ami_parameter }}
 
 capabilities:
   - CAPABILITY_IAM

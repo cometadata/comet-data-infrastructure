@@ -242,7 +242,8 @@ public ECR. The batch and Airflow images share one s5cmd binary, built from its 
 the Go toolchain and modules pinned in `tools/s5cmd` (see [s5cmd](setup.md#s5cmd)).
 
 The three COMET images are built for `linux/amd64` (x86-64), selected by an image tag in SSM, and
-resolved to sha256 digests at deploy time. See
+resolved to sha256 digests at deploy time. The Batch compute environments run AWS's latest
+ECS-optimized Amazon Linux 2023 AMI as of the last deploy (see [Batch AMI](setup.md#batch-ami)). See
 [Image builds and releases](setup.md#image-builds-and-releases) for build, tagging, and deployment
 procedures.
 

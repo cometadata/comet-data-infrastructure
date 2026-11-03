@@ -27,6 +27,10 @@ Parameters:
   SecurityGroupId:
     Type: String
 
+  # The ECS-optimized AL2023 AMI to run; see BatchImageId in infra/config/dev/batch-platform.yaml.
+  BatchImageId:
+    Type: 'AWS::EC2::Image::Id'
+
 Resources:
   BatchLaunchTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
@@ -74,8 +78,6 @@ Resources:
             #!/bin/bash
             set -uxo pipefail
 
-            dnf update -y
-
             dnf install amazon-cloudwatch-agent mdadm htop -y
 
 {% filter indent(12, true) %}{% include 'includes/setup-data-disk.sh' %}{% endfilter %}
@@ -121,13 +123,20 @@ Resources:
   {{ q.prefix }}ComputeEnvironment:
     Type: 'AWS::Batch::ComputeEnvironment'
     Properties:
-      # Omit the name so CloudFormation can replace the compute environment.
-      # Omit ServiceRole so Batch uses its service-linked role.
+      # A new BatchImageId updates the compute environment in place: Batch replaces its instances once
+      # their running jobs finish, or after JobExecutionTimeoutMinutes (the maximum Batch allows). In-place
+      # updates need the service-linked role (so ServiceRole is omitted) and BEST_FIT_PROGRESSIVE. The name
+      # is omitted so CloudFormation can still replace the compute environment for changes that need it.
       Type: 'MANAGED'
+      ReplaceComputeEnvironment: false
+      UpdatePolicy:
+        TerminateJobsOnUpdate: false
+        JobExecutionTimeoutMinutes: 7200
       ComputeResources:
         Type: 'EC2'
         Ec2Configuration:
           - ImageType: 'ECS_AL2023'
+            ImageIdOverride: !Ref BatchImageId
         AllocationStrategy: 'BEST_FIT_PROGRESSIVE'
         MinvCpus: 0
         MaxvCpus: {{ q.max_vcpus }}

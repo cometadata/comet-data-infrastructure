@@ -6,8 +6,9 @@ Parameters:
   Env:
     Type: 'String'
 
+  # An AMI ID or resolve:ssm:<parameter>, which EC2 resolves each time the instance launches.
   ImageId:
-    Type: 'AWS::EC2::Image::Id'
+    Type: 'String'
 
   SubnetId:
     Type: 'AWS::EC2::Subnet::Id'
@@ -90,8 +91,6 @@ Resources:
             cat > /tmp/setup-instance.sh << 'SCRIPT'
             #!/bin/bash
             set -uxo pipefail
-
-            dnf update -y
 
             dnf install amazon-cloudwatch-agent mdadm docker amazon-ecr-credential-helper htop -y
 

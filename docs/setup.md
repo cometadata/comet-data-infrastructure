@@ -400,6 +400,17 @@ Sceptre templates are Jinja2 (`.j2`): Sceptre renders the Jinja first, then depl
 CloudFormation. Wrap literal `{{...}}` values (e.g. `{{resolve:secretsmanager:...}}`) in
 `{% raw %}...{% endraw %}` so Jinja doesn't evaluate them.
 
+## Batch AMI
+
+The Batch compute environments run the latest ECS-optimized Amazon Linux 2023 AMI. Each deploy reads
+the AMI ID from AWS's public SSM parameter, set by `latest_ami_parameter` in
+`infra/config/config.yaml`, so deploying `batch-platform` moves Batch onto a newer AMI when there is
+one. `make diff` shows this as a change to `BatchImageId`.
+
+Batch updates the compute environments in place. Running jobs finish on their current instances, and
+new jobs start on the new AMI. Jobs still running after 5 days, the longest Batch allows, are
+stopped, so deploy while the queues are quiet.
+
 ## Dev EC2 instance
 
 The dev instance is managed by an Auto Scaling Group (`comet-dev-ec2-asg`) that defaults to zero
@@ -411,10 +422,12 @@ make dev-status    # show desired capacity, instance ID, and suspended processes
 make dev-down      # terminate the instance
 ```
 
-After changing the AMI, instance type, or launch template, run `make launch STACK=ec2.yaml` to
-update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to
-the current instance, run `make dev-refresh`, which replaces it with one using the new
-configuration.
+Each new instance starts from the latest Amazon Linux 2023 AMI. Instances don't run `dnf update` at
+boot, so run `make dev-refresh` to pick up OS patches.
+
+After changing the instance type or launch template, run `make launch STACK=ec2.yaml` to update the
+Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current
+instance, run `make dev-refresh`, which replaces it with one using the new configuration.
 
 A scheduled action sets the desired capacity to zero each night, preventing forgotten instances from
 continuing to run. The hour and time zone come from `instance_shutdown_hour` and

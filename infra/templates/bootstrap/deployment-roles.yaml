@@ -62,6 +62,13 @@ Resources:
                   - 'sns:List*'
                 Resource: '*'
 
+              # EC2 checks that the creator of a launch template with a resolve:ssm: ImageId can read
+              # the parameter (the dev instance launch template in ec2.j2).
+              - Sid: 'ResolveAmiParameters'
+                Effect: 'Allow'
+                Action: 'ssm:GetParameters'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter/aws/service/ami-amazon-linux-latest/*'
+
               # These services embed generated IDs in their ARNs, so they cannot be scoped
               # to environment-named resources.
               - Sid: 'UnscopedProvisioningActions'
@@ -249,6 +256,8 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:s3:::${TemplateBucketName}/*'
                   - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/${Env}/*'
                   - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter/aws/service/ami-*'
+                  # The latest ECS-optimized AMI, which the batch-platform config reads.
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter/aws/service/ecs/optimized-ami/*'
                   - !Ref CodeConnectionArn
 
               # Stack changes must use the CloudFormation service role.
