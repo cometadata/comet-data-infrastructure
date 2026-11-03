@@ -190,10 +190,10 @@ flowchart LR
     ecr --> ds
 ```
 
-Pushing to `main` runs the build pipeline. It builds the three images one after another and tags
-them with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release
-pipeline, which adds the tag `0.1.0` to those images without rebuilding them. A release fails if its
-commit hasn't been built.
+Pushing to `main` runs the build pipeline. It builds the three images one after another from the
+latest base images, with no layer cache, and tags them with the commit, for example `sha-98dea10`.
+Pushing a tag such as `v0.1.0` runs the release pipeline, which adds the tag `0.1.0` to those images
+without rebuilding them. A release fails if its commit hasn't been built.
 
 Release tags are retained. ECR retains the latest 50 `sha-*` builds, the latest 10 `local-*` builds,
 and the latest three untagged images.

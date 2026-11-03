@@ -19,7 +19,6 @@ MAKE_VARIABLES = (
     "ECR_REGISTRY",
     "SOURCE_TAG",
     "VERSION_TAG",
-    "REGISTRY_CACHE",
     "SKIP_EXISTING",
     "STACK",
     "YES",

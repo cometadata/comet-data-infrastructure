@@ -11,8 +11,8 @@ ENV ?= dev
 # The default tag identifies the current commit. When pushing uncommitted changes, set a unique
 # tag such as IMAGE_TAG=local-1 because ECR tags cannot be overwritten.
 IMAGE_TAG ?= sha-$(shell git rev-parse --short=7 HEAD)
-# User-supplied values are read by the shell so any value is forwarded verbatim.
-export ENV IMAGE_TAG ECR_REGISTRY SOURCE_TAG VERSION_TAG REGISTRY_CACHE SKIP_EXISTING STACK YES
+# User-supplied values are read by the shell, never expanded into recipe text by Make.
+export ENV IMAGE_TAG ECR_REGISTRY SOURCE_TAG VERSION_TAG SKIP_EXISTING STACK YES
 
 UV_RUN = uv run --locked --no-active
 UV_INFRA = uv run --project infra --locked --no-active
@@ -32,7 +32,7 @@ help:
 > @echo "Dev instance: dev-up, dev-down, dev-refresh, dev-keepalive, dev-autostop, dev-status"
 > @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, test-s5cmd, clean"
 > @echo
-> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, REGISTRY_CACHE, SKIP_EXISTING, STACK, YES"
+> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, SKIP_EXISTING, STACK, YES"
 
 check-ecr-registry:
 > @test -n "$$ECR_REGISTRY" || { echo >&2 "ECR_REGISTRY is required but not set. Aborting."; exit 1; }
@@ -42,17 +42,6 @@ check-image-tag:
 
 check-source-tag:
 > @test -n "$$SOURCE_TAG" || { echo >&2 "SOURCE_TAG is required but not set. Aborting."; exit 1; }
-
-# Sets the cache_args array used by buildx; empty unless REGISTRY_CACHE is set.
-define cache_args
-cache_args=(); \
-  if [[ -n "$$REGISTRY_CACHE" ]]; then \
-    [[ -n "$$ECR_REGISTRY" ]] || { echo >&2 "ECR_REGISTRY is required when REGISTRY_CACHE is set. Aborting."; exit 1; }; \
-    cache_ref="$$ECR_REGISTRY/comet-$$ENV-buildcache:$(1)"; \
-    cache_args+=(--cache-from "type=registry,ref=$${cache_ref}"); \
-    cache_args+=(--cache-to "type=registry,ref=$${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"); \
-  fi
-endef
 
 # s5cmd binary for the batch and Airflow images, built from the versions pinned in tools/s5cmd and
 # exported to build/s5cmd/.
@@ -66,8 +55,7 @@ test-s5cmd:
 
 # COMET runtime image (comet-<env>-batch): AWS Batch and the dev arXiv pipeline.
 build-batch: build-s5cmd
-> @$(call cache_args,batch); \
-  docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.batch \
+> docker buildx build --platform linux/amd64 --provenance=false --pull --load -f Dockerfile.batch \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     --build-arg "UV_VERSION=$(UV_VERSION)" \
     --build-arg "DUCKDB_VERSION=$(DUCKDB_VERSION)" \
@@ -83,8 +71,7 @@ push-batch: check-ecr-registry check-image-tag build-batch
 
 # Marple image pinned by MARPLE_SHA in versions.env.
 build-marple:
-> @$(call cache_args,marple); \
-  docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.marple \
+> docker buildx build --platform linux/amd64 --provenance=false --pull --load -f Dockerfile.marple \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     --build-arg "UV_VERSION=$(UV_VERSION)" \
     --build-arg "MARPLE_REPO=$(MARPLE_REPO)" \
@@ -110,8 +97,7 @@ check-airflow-version:
 >   [ "$$locked" = "$(AIRFLOW_VERSION)" ] || { echo >&2 "versions.env has AIRFLOW_VERSION=$(AIRFLOW_VERSION) but uv.lock has $$locked. Run make bump-airflow."; exit 1; }
 
 build-airflow: check-airflow-version build-s5cmd
-> @$(call cache_args,airflow); \
-  docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.airflow \
+> docker buildx build --platform linux/amd64 --provenance=false --pull --load -f Dockerfile.airflow \
     --build-arg "AIRFLOW_VERSION=$(AIRFLOW_VERSION)" \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     -t "comet-airflow:$(AIRFLOW_VERSION)" -t comet-airflow:latest .

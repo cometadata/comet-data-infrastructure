@@ -237,10 +237,9 @@ respective credentials.
 | OpenSearch | `public.ecr.aws/opensearchproject/opensearch`, `versions.opensearch` in `infra/config/config.yaml` | The OpenSearch container in enrich-with-ror jobs |
 
 The COMET names in the table are local build names. Their private ECR repositories are
-`comet-<env>-batch`, `comet-<env>-marple`, and `comet-<env>-airflow`. The separate
-`comet-<env>-buildcache` repository stores BuildKit cache layers, not a runtime image. OpenSearch is
-pulled from public ECR. The batch and Airflow images share one s5cmd binary, built from its release
-source with the Go toolchain and modules pinned in `tools/s5cmd` (see [s5cmd](setup.md#s5cmd)).
+`comet-<env>-batch`, `comet-<env>-marple`, and `comet-<env>-airflow`. OpenSearch is pulled from
+public ECR. The batch and Airflow images share one s5cmd binary, built from its release source with
+the Go toolchain and modules pinned in `tools/s5cmd` (see [s5cmd](setup.md#s5cmd)).
 
 The three COMET images are built for `linux/amd64` (x86-64), selected by an image tag in SSM, and
 resolved to sha256 digests at deploy time. See

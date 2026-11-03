@@ -29,5 +29,5 @@ phases:
         if [[ "$PIPELINE_MODE" == release ]]; then
           make retag SOURCE_TAG="$IMAGE_TAG" VERSION_TAG="$VERSION_TAG"
         else
-          make push-all IMAGE_TAG="$IMAGE_TAG" SKIP_EXISTING=1 REGISTRY_CACHE=1
+          make push-all IMAGE_TAG="$IMAGE_TAG" SKIP_EXISTING=1
         fi

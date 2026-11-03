@@ -45,34 +45,6 @@ Resources:
         ScanOnPush: true
 {{- lifecycle_policy() }}
 
-  # BuildKit layer cache pushed by CI; mutable because the cache tags are overwritten
-  # on every build.
-  BuildCacheRepository:
-    Type: 'AWS::ECR::Repository'
-    DeletionPolicy: 'Retain'
-    UpdateReplacePolicy: 'Retain'
-    Properties:
-      RepositoryName: !Sub '${RepositoryName}-buildcache'
-      ImageTagMutability: 'MUTABLE'
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Expire untagged cache layers",
-                "selection": {
-                  "tagStatus": "untagged",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 1
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
-
 Outputs:
   BatchRepositoryArn:
     Value: !GetAtt BatchRepository.Arn
@@ -82,6 +54,3 @@ Outputs:
 
   AirflowRepositoryArn:
     Value: !GetAtt AirflowRepository.Arn
-
-  BuildCacheRepositoryArn:
-    Value: !GetAtt BuildCacheRepository.Arn

@@ -24,9 +24,6 @@ Parameters:
   AirflowRepositoryArn:
     Type: String
 
-  BuildCacheRepositoryArn:
-    Type: String
-
   ArtifactBucketName:
     Type: String
 
@@ -113,7 +110,6 @@ Resources:
                   - !Ref BatchRepositoryArn
                   - !Ref MarpleRepositoryArn
                   - !Ref AirflowRepositoryArn
-                  - !Ref BuildCacheRepositoryArn
               - Effect: 'Allow'
                 Action: 'ecr:GetAuthorizationToken'
                 Resource: '*'

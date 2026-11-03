@@ -19,7 +19,6 @@ parameters:
   BatchRepositoryArn: !stack_output dev/ecr.yaml::BatchRepositoryArn
   MarpleRepositoryArn: !stack_output dev/ecr.yaml::MarpleRepositoryArn
   AirflowRepositoryArn: !stack_output dev/ecr.yaml::AirflowRepositoryArn
-  BuildCacheRepositoryArn: !stack_output dev/ecr.yaml::BuildCacheRepositoryArn
   ArtifactBucketName: !stack_output dev/s3.yaml::ArtifactBucketName
   ArtifactBucketArn: !stack_output dev/s3.yaml::ArtifactBucketARN
   AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
