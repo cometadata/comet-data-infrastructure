@@ -411,6 +411,11 @@ Batch updates the compute environments in place. Running jobs finish on their cu
 new jobs start on the new AMI. Jobs still running after 5 days, the longest Batch allows, are
 stopped, so deploy while the queues are quiet.
 
+The monitor checks once a day, just after midnight UTC, whether Batch is on the latest AMI. The
+`batch-ami-behind` alarm notifies the alert topic when a newer AMI is available, and clears at the
+first check after a deploy. If the check stops reporting, the alarm goes to insufficient data and
+notifies the alert topic too.
+
 ## Dev EC2 instance
 
 The dev instance is managed by an Auto Scaling Group (`comet-dev-ec2-asg`) that defaults to zero

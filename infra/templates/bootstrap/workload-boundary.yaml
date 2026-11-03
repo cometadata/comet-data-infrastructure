@@ -20,6 +20,10 @@ Parameters:
   SlackWebhookSecretArn:
     Type: String
 
+  # SSM parameter with the latest ECS-optimized AMI; must match latest_ami_parameter in infra/config/config.yaml.
+  LatestAmiParameter:
+    Type: String
+
 Resources:
   WorkloadBoundary:
     Type: 'AWS::IAM::ManagedPolicy'
@@ -34,6 +38,8 @@ Resources:
           - Sid: 'HostAgentAndDiscoveryActions'
             Effect: 'Allow'
             Action:
+              - 'batch:DescribeComputeEnvironments'
+              - 'batch:DescribeJobQueues'
               - 'batch:DescribeJobs'
               - 'cloudwatch:PutMetricData'
               - 'ec2:Describe*'
@@ -105,6 +111,8 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/*'
               - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:comet-${Env}-*'
               - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/AmazonCloudWatch-*'
+              # The latest ECS-optimized AMI, read by the monitor.
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter${LatestAmiParameter}'
               - !Sub 'arn:${AWS::Partition}:s3:::comet-${Env}-*'
               - !Sub 'arn:${AWS::Partition}:s3:::arxiv'
               - !Sub 'arn:${AWS::Partition}:s3:::arxiv/*'

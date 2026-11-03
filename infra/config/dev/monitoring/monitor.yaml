@@ -14,6 +14,7 @@ parameters:
   Env: "{{ var.env }}"
   AlertTopicArn: !stack_output dev/monitoring/alerts.yaml::AlertTopicArn
   LambdaPythonRuntime: {{ stack_group_config.versions.lambda_python }}
+  LatestAmiParameter: {{ stack_group_config.latest_ami_parameter }}
   ClusterName: !stack_output dev/airflow.yaml::EcsClusterName
   FargateWorkerTaskDefinitionArn: !stack_output dev/airflow.yaml::AirflowWorkerTaskDefArn
   ExpectedServiceTasks: !stack_output dev/airflow-services.yaml::ExpectedServiceTaskCount
