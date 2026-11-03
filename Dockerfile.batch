@@ -44,14 +44,8 @@ RUN mkdir -p ${TMPDIR}
 
 WORKDIR /app
 
-# Install s5cmd
-ARG S5CMD_VERSION
-ENV S5CMD_VERSION=${S5CMD_VERSION}
-RUN wget https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz && \
-    tar -xzf s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz s5cmd && \
-    chmod 755 s5cmd && \
-    mv s5cmd /usr/local/bin/ && \
-    rm s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz
+# s5cmd from `make build-s5cmd`.
+COPY --chmod=755 build/s5cmd/s5cmd /usr/local/bin/s5cmd
 
 # Install duckdb.
 ARG DUCKDB_VERSION

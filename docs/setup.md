@@ -211,6 +211,19 @@ Versions are pinned in two places:
   the Lambda Python runtime, and the Docker plugins on the dev instance. Changing one needs a
   deploy.
 
+### s5cmd
+
+The batch and Airflow images share one s5cmd binary, built from s5cmd's release source.
+`tools/s5cmd` pins the s5cmd release and the Go modules it's built with (`go.mod` and `go.sum`), and
+the Go image (`Dockerfile`).
+
+Dependabot opens a weekly PR when s5cmd, its modules or the Go image have a new version. It waits 14
+days after a release, except for security fixes. CI runs s5cmd's own tests and `govulncheck` on each
+PR. To ship an update, merge the PR and cut a release.
+
+s5cmd still uses the AWS SDK for Go v1, which no longer gets fixes, so Trivy and Dependabot list
+advisories for it that have no fixed version.
+
 ## Deploying dev stacks
 
 Deployments use the image tag stored in the SSM parameter `<ssm_prefix>/dev/images/tag`. Select an

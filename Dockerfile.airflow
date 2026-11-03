@@ -6,7 +6,6 @@ ARG PYTHON_VERSION
 FROM apache/airflow:slim-${AIRFLOW_VERSION}-python${PYTHON_VERSION}
 
 ARG AIRFLOW_VERSION
-ARG S5CMD_VERSION
 
 # Use the uv bundled with the Airflow base image.
 # Cache and site-packages are on separate filesystems; copy instead of hardlinking.
@@ -16,10 +15,8 @@ USER root
 RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 # comet uses /data as its working dir.
 RUN mkdir -p /data && chown airflow:0 /data
-# comet shells out to s5cmd to copy files to and from S3.
-RUN curl -fsSL "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-64bit.tar.gz" \
-      | tar -xz -C /usr/local/bin s5cmd \
-    && chmod +x /usr/local/bin/s5cmd
+# comet shells out to s5cmd to copy files to and from S3; built by `make build-s5cmd`.
+COPY --chmod=755 build/s5cmd/s5cmd /usr/local/bin/s5cmd
 USER airflow
 
 # Overlay dependencies from uv.lock onto the base image environment.

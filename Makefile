@@ -26,11 +26,11 @@ RUFF_PATHS = ./src ./dags ./infra/deploy ./infra/resolvers
 help:
 > @echo "Usage: make <target> [VARIABLE=value]"
 > @echo
-> @echo "Images: build-batch, build-marple, build-airflow, push-batch, push-marple, push-airflow, push-all"
+> @echo "Images: build-s5cmd, build-batch, build-marple, build-airflow, push-batch, push-marple, push-airflow, push-all"
 > @echo "Releases: retag, promote"
 > @echo "Deployment: sync-vars, secrets, status, diff, launch, bootstrap, delete"
 > @echo "Dev instance: dev-up, dev-down, dev-refresh, dev-keepalive, dev-autostop, dev-status"
-> @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, clean"
+> @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, test-s5cmd, clean"
 > @echo
 > @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, REGISTRY_CACHE, SKIP_EXISTING, STACK, YES"
 
@@ -54,13 +54,22 @@ cache_args=(); \
   fi
 endef
 
+# s5cmd binary for the batch and Airflow images, built from the versions pinned in tools/s5cmd and
+# exported to build/s5cmd/.
+build-s5cmd:
+> docker buildx build --platform linux/amd64 --provenance=false --pull -f tools/s5cmd/Dockerfile \
+    --output type=local,dest=build/s5cmd tools/s5cmd
+
+# Run s5cmd's own tests and govulncheck against the pinned versions (run by CI).
+test-s5cmd:
+> docker buildx build --platform linux/amd64 --provenance=false --pull -f tools/s5cmd/Dockerfile --target test tools/s5cmd
+
 # COMET runtime image (comet-<env>-batch): AWS Batch and the dev arXiv pipeline.
-build-batch:
+build-batch: build-s5cmd
 > @$(call cache_args,batch); \
   docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.batch \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     --build-arg "UV_VERSION=$(UV_VERSION)" \
-    --build-arg "S5CMD_VERSION=$(S5CMD_VERSION)" \
     --build-arg "DUCKDB_VERSION=$(DUCKDB_VERSION)" \
     --build-arg "RUST_TARGET_CPU=$(RUST_TARGET_CPU)" \
     --build-arg "ARXIV_TEX_EXTRACT_REPO=$(ARXIV_TEX_EXTRACT_REPO)" \
@@ -100,12 +109,11 @@ check-airflow-version:
 > @locked=$$(uv export --locked --no-dev --no-emit-project --no-hashes --no-annotate --extra airflow | grep '^apache-airflow==' | sed -E 's/^apache-airflow==([^ \\]+).*/\1/'); \
 >   [ "$$locked" = "$(AIRFLOW_VERSION)" ] || { echo >&2 "versions.env has AIRFLOW_VERSION=$(AIRFLOW_VERSION) but uv.lock has $$locked. Run make bump-airflow."; exit 1; }
 
-build-airflow: check-airflow-version
+build-airflow: check-airflow-version build-s5cmd
 > @$(call cache_args,airflow); \
   docker buildx build --platform linux/amd64 --provenance=false --load "$${cache_args[@]}" -f Dockerfile.airflow \
     --build-arg "AIRFLOW_VERSION=$(AIRFLOW_VERSION)" \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
-    --build-arg "S5CMD_VERSION=$(S5CMD_VERSION)" \
     -t "comet-airflow:$(AIRFLOW_VERSION)" -t comet-airflow:latest .
 
 push-airflow: check-ecr-registry check-image-tag build-airflow

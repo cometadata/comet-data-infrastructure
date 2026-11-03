@@ -1,0 +1,21 @@
+name: s5cmd
+
+# s5cmd's own tests and govulncheck against the versions pinned in tools/s5cmd. Runs only when those
+# versions, or how they are built, change: mainly Dependabot's PRs.
+on:
+  push:
+    paths:
+      - tools/s5cmd/**
+      - Makefile
+      - .github/workflows/s5cmd.yml
+
+jobs:
+  s5cmd:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Test s5cmd
+        run: make test-s5cmd

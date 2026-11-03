@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # The s5cmd release and the Go modules it is built with, pinned in tools/s5cmd/go.mod and go.sum. A PR here
+  # is how a new s5cmd release shows up; CI runs s5cmd's tests against the PR's versions.
+  - package-ecosystem: gomod
+    directory: /tools/s5cmd
+    schedule:
+      interval: weekly
+    # s5cmd is listed through go.mod's `tool` directive, which marks it `// indirect`, as are all the modules
+    # it pulls in. Dependabot only updates direct dependencies unless told otherwise.
+    allow:
+      - dependency-type: all
+    # Version updates wait 14 days after a release, so a compromised release has time to be caught.
+    # Security updates do not wait.
+    cooldown:
+      default-days: 14
+    # One PR for everything, because the modules are tested together.
+    groups:
+      s5cmd-modules:
+        patterns: ["*"]
+
+  # The golang image in tools/s5cmd/Dockerfile. It is pinned by tag and digest in the Dockerfile rather than
+  # in versions.env, because Dependabot can only update a FROM line it can read.
+  - package-ecosystem: docker
+    directory: /tools/s5cmd
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
