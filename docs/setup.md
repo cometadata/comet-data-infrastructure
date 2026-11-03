@@ -195,6 +195,16 @@ and the latest three untagged images.
 The pipeline uses the GitHub connection and `codebuild_image` configured during the
 [first deployment](#first-deployment).
 
+### Versions
+
+Versions are pinned in two places:
+
+- `versions.env` holds what's built into the images, such as Airflow, uv, DuckDB, comet-enrich and
+  Marple. Changing one needs a new build.
+- `versions:` in `infra/config/config.yaml` holds what CloudFormation deploys: OpenSearch, Postgres,
+  the Lambda Python runtime, and the Docker plugins on the dev instance. Changing one needs a
+  deploy.
+
 ## Deploying dev stacks
 
 Deployments use the image tag stored in the SSM parameter `<ssm_prefix>/dev/images/tag`. Select an

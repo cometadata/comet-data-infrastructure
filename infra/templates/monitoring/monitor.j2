@@ -12,6 +12,9 @@ Parameters:
   ClusterName:
     Type: String
 
+  LambdaPythonRuntime:
+    Type: String
+
   FargateWorkerTaskDefinitionArn:
     Type: String
 
@@ -89,7 +92,7 @@ Resources:
     Type: 'AWS::Lambda::Function'
     Properties:
       Description: 'Publishes compute age, launch-rate, and Airflow service metrics'
-      Runtime: python3.13
+      Runtime: !Ref LambdaPythonRuntime
       Handler: index.handler
       MemorySize: 128
       ReservedConcurrentExecutions: 1

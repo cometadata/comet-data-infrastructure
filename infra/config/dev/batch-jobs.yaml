@@ -21,7 +21,7 @@ parameters:
     repository: comet-{{ var.env }}-marple
     tag: {{ image_tag }}
   DataBucketName: !stack_output dev/s3.yaml::DataBucketName
-  OpenSearchImage: public.ecr.aws/opensearchproject/opensearch:2.17.1
+  OpenSearchImage: public.ecr.aws/opensearchproject/opensearch:{{ stack_group_config.versions.opensearch }}
   DataCiteCredentialsSecretArn: "{{ var.datacite_credentials_secret_arn }}"
   HfCredentialsSecretArn: "{{ var.hf_credentials_secret_arn }}"
   DatasetReleasesTableArn: !stack_output dev/dynamodb.yaml::DatasetReleasesTableArn

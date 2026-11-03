@@ -234,7 +234,7 @@ respective credentials.
 | `comet-batch`   | `Dockerfile.batch`   | AWS Batch jobs and the dev EC2 arXiv pipeline   |
 | `comet-marple`  | `Dockerfile.marple`  | The Marple container in enrich-with-ror jobs    |
 | `comet-airflow` | `Dockerfile.airflow` | Airflow services and Fargate workers            |
-| OpenSearch | `public.ecr.aws/opensearchproject/opensearch:2.17.1` | The OpenSearch container in enrich-with-ror jobs |
+| OpenSearch | `public.ecr.aws/opensearchproject/opensearch`, `versions.opensearch` in `infra/config/config.yaml` | The OpenSearch container in enrich-with-ror jobs |
 
 The COMET names in the table are local build names. Their private ECR repositories are
 `comet-<env>-batch`, `comet-<env>-marple`, and `comet-<env>-airflow`. The separate
