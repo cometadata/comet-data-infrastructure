@@ -105,6 +105,7 @@ run `make bootstrap` again when these deployment permissions change.
    connection, and repository. Leave `permissions_boundary_arn`, `cloudformation_service_role_arn`,
    and `deployment_runner_role_arn` empty for now. `Environment` and `Service` are added to the
    stack tags by Sceptre.
+
 3. Create the four secrets that CloudFormation does not manage: the
    [DataCite credentials](#datacite-credentials),
    [Hugging Face publish credentials](#hugging-face-publish-credentials),
@@ -118,6 +119,7 @@ run `make bootstrap` again when these deployment permissions change.
    `vars-dev.yaml`, and prints its ARN. Copy the ARNs into `vars-dev.yaml`, then set each secret's
    value in the Secrets Manager console as described in the linked sections. The command never
    writes secret values. If a secret already exists, it only updates the secret's tags.
+
 4. Using credentials that can create IAM roles and managed policies, create the deployment
    permissions:
 
@@ -146,8 +148,12 @@ run `make bootstrap` again when these deployment permissions change.
    ```
 
 8. Push a commit to `main`, or start the main image-build pipeline in CodePipeline, to build the
-   first image set. When the build finishes, select its `sha-*` tag with
-   `make promote SOURCE_TAG=<tag>`.
+   first set of images. When the build finishes, select its `sha-*` tag:
+
+   ```bash
+   make promote SOURCE_TAG=<tag>
+   ```
+
 9. Preview and deploy the remaining stacks:
 
    ```bash
@@ -184,10 +190,10 @@ flowchart LR
     ecr --> ds
 ```
 
-Pushing to `main` runs the build pipeline, which builds the three images sequentially and tags them
-with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release
-pipeline, which adds `0.1.0` to those existing images without rebuilding them. The release fails if
-the commit was not built first.
+Pushing to `main` runs the build pipeline. It builds the three images one after another and tags
+them with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release
+pipeline, which adds the tag `0.1.0` to those images without rebuilding them. A release fails if its
+commit hasn't been built.
 
 Release tags are retained. ECR retains the latest 50 `sha-*` builds, the latest 10 `local-*` builds,
 and the latest three untagged images.
