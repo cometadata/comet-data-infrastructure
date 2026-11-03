@@ -4,11 +4,16 @@
 
 Install the following tools using their installation instructions:
 
-* [uv](https://docs.astral.sh/uv/getting-started/installation/) for the Python environments.
-* [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) for AWS commands.
-* [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) for Airflow UI access.
-* [Docker](https://docs.docker.com/get-started/get-docker/) with [Buildx](https://docs.docker.com/build/concepts/overview/) for local image builds. Docker Desktop includes Buildx.
-* [Amazon ECR Credential Helper](https://github.com/awslabs/amazon-ecr-credential-helper#installing) for Docker authentication to ECR.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for the Python environments.
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) for AWS
+  commands.
+- [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+  for Airflow UI access.
+- [Docker](https://docs.docker.com/get-started/get-docker/) with
+  [Buildx](https://docs.docker.com/build/concepts/overview/) for local image builds. Docker Desktop
+  includes Buildx.
+- [Amazon ECR Credential Helper](https://github.com/awslabs/amazon-ecr-credential-helper#installing)
+  for Docker authentication to ECR.
 
 Then run:
 
@@ -17,11 +22,14 @@ make install
 make install-infra
 ```
 
-These commands create the root and infrastructure environments from `uv.lock` and `infra/uv.lock`, respectively.
+These commands create the root and infrastructure environments from `uv.lock` and `infra/uv.lock`,
+respectively.
 
 ## AWS authentication
 
-Configure authentication for your AWS account using the [AWS authentication instructions](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-authentication.html). All AWS commands and scripts in this guide use your configured credentials.
+Configure authentication for your AWS account using the
+[AWS authentication instructions](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-authentication.html).
+All AWS commands and scripts in this guide use your configured credentials.
 
 ## Environment variables
 
@@ -33,7 +41,8 @@ export ECR_REGISTRY=<aws-account-id>.dkr.ecr.<region>.amazonaws.com
 
 ## Docker authentication
 
-Add the ECR credential helper to `~/.docker/config.json`, using your `ECR_REGISTRY` value as the registry key:
+Add the ECR credential helper to `~/.docker/config.json`, using your `ECR_REGISTRY` value as the
+registry key:
 
 ```json
 {
@@ -43,25 +52,45 @@ Add the ECR credential helper to `~/.docker/config.json`, using your `ECR_REGIST
 }
 ```
 
-No manual `docker login` is needed. See the [helper's configuration instructions](https://github.com/awslabs/amazon-ecr-credential-helper#configuration) for details.
+No manual `docker login` is needed. See the
+[helper's configuration instructions](https://github.com/awslabs/amazon-ecr-credential-helper#configuration)
+for details.
 
 ## AWS account prerequisites
 
-COMET uses a shared VPC, public subnet, and route table created outside this repository. You also need an S3 bucket for CloudFormation templates and a GitHub connection in **Developer Tools → Settings → Connections**. Create and authorize the connection, and confirm that its status is **Available**. Record the stack outputs, bucket name, connection ARN, and GitHub repository ID in `vars-dev.yaml` during the [first deployment](#first-deployment).
+COMET uses a shared VPC, public subnet, and route table created outside this repository. You also
+need an S3 bucket for CloudFormation templates and a GitHub connection in
+**Developer Tools → Settings → Connections**. Create and authorize the connection, and confirm that
+its status is **Available**. Record the stack outputs, bucket name, connection ARN, and GitHub
+repository ID in `vars-dev.yaml` during the [first deployment](#first-deployment).
 
-The four Secrets Manager secrets that CloudFormation does not manage are created with `make secrets` during the [first deployment](#first-deployment).
+The four Secrets Manager secrets that CloudFormation does not manage are created with `make secrets`
+during the [first deployment](#first-deployment).
 
-Enable resource tags for telemetry in the COMET AWS account before deploying the monitoring stacks. In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is enabled.
+Enable resource tags for telemetry in the COMET AWS account before deploying the monitoring stacks.
+In the CloudWatch console, open **Settings**, find **Enable resource tags for telemetry**, and turn
+it on. The tag-scoped log-ingestion alarm receives no data until this account-level setting is
+enabled.
 
 ## Deployment permissions
 
 `make bootstrap` creates three resources used by later deployments:
 
-* The CodeBuild runner role reads the deployment inputs, creates, updates, and deletes only `comet-<env>-*` CloudFormation stacks through the service role, reads the external stack outputs used by the configuration, and runs the Airflow database migration task.
-* The CloudFormation service role has broad permissions to create and update the AWS resources used by the environment. Any IAM role it creates must have the COMET permissions boundary. It cannot create IAM users or access keys or change the roles and policies created by `make bootstrap`.
-* The permissions boundary is attached to every IAM role created by the environment stacks, including roles for services, jobs, builds, and monitoring. Both a role's own policy and the boundary must allow an action. The boundary permits the environment's resources and the AWS read, monitoring, and Systems Manager or ECS agent calls needed to run them.
+- The CodeBuild runner role reads the deployment inputs, creates, updates, and deletes only
+  `comet-<env>-*` CloudFormation stacks through the service role, reads the external stack outputs
+  used by the configuration, and runs the Airflow database migration task.
+- The CloudFormation service role has broad permissions to create and update the AWS resources used
+  by the environment. Any IAM role it creates must have the COMET permissions boundary. It cannot
+  create IAM users or access keys or change the roles and policies created by `make bootstrap`.
+- The permissions boundary is attached to every IAM role created by the environment stacks,
+  including roles for services, jobs, builds, and monitoring. Both a role's own policy and the
+  boundary must allow an action. The boundary permits the environment's resources and the AWS read,
+  monitoring, and Systems Manager or ECS agent calls needed to run them.
 
-CloudFormation assigns names to the roles and policies. Their IAM paths remain under `/comet/bootstrap/<env>/` or `/comet/<env>/<component>/`, so policies can match an environment's resources without depending on generated names. `make launch` does not update the bootstrap stacks; run `make bootstrap` again when these deployment permissions change.
+CloudFormation assigns names to the roles and policies. Their IAM paths remain under
+`/comet/bootstrap/<env>/` or `/comet/<env>/<component>/`, so policies can match an environment's
+resources without depending on generated names. `make launch` does not update the bootstrap stacks;
+run `make bootstrap` again when these deployment permissions change.
 
 ## First deployment
 
@@ -71,15 +100,28 @@ CloudFormation assigns names to the roles and policies. Their IAM paths remain u
    cp vars-dev.yaml.example vars-dev.yaml
    ```
 
-2. Fill in the environment settings and every placeholder except the three bootstrap outputs. This includes the template bucket, SSM prefix, shared network stack outputs, alert addresses, GitHub connection, and repository. Leave `permissions_boundary_arn`, `cloudformation_service_role_arn`, and `deployment_runner_role_arn` empty for now. `Environment` and `Service` are added to the stack tags by Sceptre.
-3. Create the four secrets that CloudFormation does not manage: the [DataCite credentials](#datacite-credentials), [Hugging Face publish credentials](#hugging-face-publish-credentials), [Airflow Fernet key](#rotating-the-fernet-key), and [Slack webhook](#configure-slack-alerts):
+2. Fill in the environment settings and every placeholder except the three bootstrap outputs. This
+   includes the template bucket, SSM prefix, shared network stack outputs, alert addresses, GitHub
+   connection, and repository. Leave `permissions_boundary_arn`, `cloudformation_service_role_arn`,
+   and `deployment_runner_role_arn` empty for now. `Environment` and `Service` are added to the
+   stack tags by Sceptre.
+
+3. Create the four secrets that CloudFormation does not manage: the
+   [DataCite credentials](#datacite-credentials),
+   [Hugging Face publish credentials](#hugging-face-publish-credentials),
+   [Airflow Fernet key](#rotating-the-fernet-key), and [Slack webhook](#configure-slack-alerts):
 
    ```bash
    make secrets
    ```
 
-   The command creates each secret without a value, tags it with the stack tags from `vars-dev.yaml`, and prints its ARN. Copy the ARNs into `vars-dev.yaml`, then set each secret's value in the Secrets Manager console as described in the linked sections. The command never writes secret values. If a secret already exists, it only updates the secret's tags.
-4. Using credentials that can create IAM roles and managed policies, create the deployment permissions:
+   The command creates each secret without a value, tags it with the stack tags from
+   `vars-dev.yaml`, and prints its ARN. Copy the ARNs into `vars-dev.yaml`, then set each secret's
+   value in the Secrets Manager console as described in the linked sections. The command never
+   writes secret values. If a secret already exists, it only updates the secret's tags.
+
+4. Using credentials that can create IAM roles and managed policies, create the deployment
+   permissions:
 
    ```bash
    make bootstrap
@@ -87,9 +129,9 @@ CloudFormation assigns names to the roles and policies. Their IAM paths remain u
 
 5. Copy the stack outputs into `vars-dev.yaml`:
 
-   * `BoundaryArn` → `permissions_boundary_arn`
-   * `ServiceRoleArn` → `cloudformation_service_role_arn`
-   * `RunnerRoleArn` → `deployment_runner_role_arn`
+   - `BoundaryArn` → `permissions_boundary_arn`
+   - `ServiceRoleArn` → `cloudformation_service_role_arn`
+   - `RunnerRoleArn` → `deployment_runner_role_arn`
 
 6. Store the completed variables file in Parameter Store for the deploy project:
 
@@ -97,14 +139,21 @@ CloudFormation assigns names to the roles and policies. Their IAM paths remain u
    make sync-vars
    ```
 
-7. Deploy the image-build pipeline and deploy project. Sceptre also launches the ECR, S3, and monitoring alert stacks required by the build pipeline:
+7. Deploy the image-build pipeline and deploy project. Sceptre also launches the ECR, S3, and
+   monitoring alert stacks required by the build pipeline:
 
    ```bash
    make launch STACK=build-pipeline.yaml
    make launch STACK=deploy.yaml
    ```
 
-8. Push a commit to `main`, or start the main image-build pipeline in CodePipeline, to build the first image set. When the build finishes, select its `sha-*` tag with `make promote SOURCE_TAG=<tag>`.
+8. Push a commit to `main`, or start the main image-build pipeline in CodePipeline, to build the
+   first set of images. When the build finishes, select its `sha-*` tag:
+
+   ```bash
+   make promote SOURCE_TAG=<tag>
+   ```
+
 9. Preview and deploy the remaining stacks:
 
    ```bash
@@ -121,8 +170,11 @@ flowchart LR
     subgraph build["Build and release"]
         main["push to main"] --> bp["build pipeline<br/>buildspec.yaml, build mode"]
         vtag["push tag v0.1.0"] --> rp["release pipeline<br/>buildspec.yaml, release mode"]
+        patch["make patch-build RELEASE=0.3.0"] --> pp["patch pipeline<br/>buildspec.yaml, patch mode"]
         bp -->|"push images tagged sha-98dea10"| ecr["ECR"]
         rp -->|"add tag 0.1.0 to existing images"| ecr
+        pp -->|"rebuild v0.3.0, push images tagged 0.3.0-20261102T0300Z"| ecr
+        pp -->|"Trivy summary vs promoted images"| alerts["alert topic"]
     end
 
     subgraph promote["Promote"]
@@ -141,38 +193,119 @@ flowchart LR
     ecr --> ds
 ```
 
-Pushing to `main` runs the build pipeline, which builds the three images sequentially and tags them with the commit, for example `sha-98dea10`. Pushing a tag such as `v0.1.0` runs the release pipeline, which adds `0.1.0` to those existing images without rebuilding them. The release fails if the commit was not built first.
+Pushing to `main` runs the build pipeline. It builds the three images one after another from the
+latest base images, with no layer cache, and tags them with the commit, for example `sha-98dea10`.
+Pushing a tag such as `v0.1.0` runs the release pipeline, which adds the tag `0.1.0` to those images
+without rebuilding them. A release fails if its commit hasn't been built.
 
-Release tags are retained. ECR retains the latest 50 `sha-*` builds, the latest 10 `local-*` builds, and the latest three untagged images.
+Release tags are retained. ECR retains the latest 50 `sha-*` builds, the latest 10 `local-*` builds,
+the latest 10 [patch builds](#patch-builds), and the latest three untagged images.
 
-The pipeline uses the GitHub connection and `codebuild_image` configured during the [first deployment](#first-deployment).
+The pipeline uses the GitHub connection and `codebuild_image` configured during the
+[first deployment](#first-deployment).
+
+### Patch builds
+
+A patch build rebuilds a release with the latest base images and system packages. Use it to pick up
+OS security fixes without cutting a new release:
+
+```bash
+make patch-build RELEASE=0.3.0   # leave out RELEASE to rebuild the latest release
+```
+
+You can also start one in the CodePipeline console: open `comet-dev-build-pipeline-patch`, choose
+**Release change**, and set `RELEASE_TAG` to a release such as `v0.3.0`, or `latest`.
+
+The pipeline rebuilds the release's three images and tags them with the release and the UTC build
+time, for example `0.3.0-20261102T0300Z`. Patch builds work for `v0.3.0` and later.
+
+Trivy then scans the new images and the promoted ones, and the alert topic gets a summary of the
+critical and high findings:
+
+```text
+0.3.0-20261102T0300Z vs promoted 0.3.0
+  batch    CRIT 2→0  HIGH 9→1
+  marple   CRIT 0→0  HIGH 3→0
+  airflow  CRIT 17→0  HIGH 40→3
+
+Full reports: https://s3.console.aws.amazon.com/s3/buckets/...
+```
+
+The full reports, as JSON and as readable tables, are kept in the artifact bucket under
+`patch-scans/<tag>/` for 30 days. `n/a` means an image couldn't be scanned. Scan problems never fail
+the build.
+
+If the results look right, promote the new tag and deploy (see
+[Deploying dev stacks](#deploying-dev-stacks)):
+
+```bash
+make promote SOURCE_TAG=0.3.0-20261102T0300Z
+```
+
+A patch build keeps the versions pinned in the release, so it doesn't pick up new Airflow, Python
+package, s5cmd or Go versions. Those need a new release.
+
+### Versions
+
+Versions are pinned in two places:
+
+- `versions.env` holds what's built into the images, such as Airflow, uv, DuckDB, comet-enrich and
+  Marple. Changing one needs a new build.
+- `versions:` in `infra/config/config.yaml` holds what CloudFormation deploys: OpenSearch, Postgres,
+  the Lambda Python runtime, and the Docker plugins on the dev instance. Changing one needs a
+  deploy.
+
+### s5cmd
+
+The batch and Airflow images share one s5cmd binary, built from s5cmd's release source.
+`tools/s5cmd` pins the s5cmd release and the Go modules it's built with (`go.mod` and `go.sum`), and
+the Go image (`Dockerfile`).
+
+Dependabot opens a weekly PR when s5cmd, its modules or the Go image have a new version. It waits 14
+days after a release, except for security fixes. CI runs s5cmd's own tests and `govulncheck` on each
+PR. To ship an update, merge the PR and cut a release.
+
+s5cmd still uses the AWS SDK for Go v1, which no longer gets fixes, so Trivy and Dependabot list
+advisories for it that have no fixed version.
 
 ## Deploying dev stacks
 
-Deployments use the image tag stored in the SSM parameter `<ssm_prefix>/dev/images/tag`. Select an image set by tag. The command checks all three repositories before updating the parameter:
+Deployments use the image tag stored in the SSM parameter `<ssm_prefix>/dev/images/tag`. Select an
+image set by tag. The command checks all three repositories before updating the parameter:
 
 ```bash
 make promote SOURCE_TAG=0.1.0       # release
 make promote SOURCE_TAG=sha-98dea10 # unreleased main build
 ```
 
-Custom local tags also work if all three images were pushed with the same tag. Unreleased SHA builds are not protected from ECR cleanup.
+Custom local tags also work if all three images were pushed with the same tag. Unreleased SHA builds
+are not protected from ECR cleanup.
 
-Each `make diff` or `make launch` resolves the tag to digests, so task and job definitions stay digest-pinned. The `airflow` and `batch-jobs` stacks report the tag as `ImageTag` and the digest URIs as parameters and outputs.
+Each `make diff` or `make launch` resolves the tag to digests, so task and job definitions stay
+digest-pinned. The `airflow` and `batch-jobs` stacks report the tag as `ImageTag` and the digest
+URIs as parameters and outputs.
 
-Releasing a commit removes its `sha-*` tag. Deploying a promoted `sha-*` tag then fails naming the missing image, while running services and jobs keep their digests. Promote the release tag instead, for example `make promote SOURCE_TAG=0.1.0`.
+Releasing a commit removes its `sha-*` tag. Deploying a promoted `sha-*` tag then fails naming the
+missing image, while running services and jobs keep their digests. Promote the release tag instead,
+for example `make promote SOURCE_TAG=0.1.0`.
 
-Preview or launch locally with `make diff` and `make launch`. Use `STACK=<stack>.yaml` to target one stack.
+Preview or launch locally with `make diff` and `make launch`. Use `STACK=<stack>.yaml` to target one
+stack.
 
-To deploy without a workstation checkout, open the `comet-dev-deploy` project in the CodeBuild console and choose **Start build** without environment overrides. The project clones `main`, fetches `vars-dev.yaml` from Parameter Store, and launches Sceptre. It does not change the image parameters.
+To deploy without a workstation checkout, open the `comet-dev-deploy` project in the CodeBuild
+console and choose **Start build** without environment overrides. The project clones `main`, fetches
+`vars-dev.yaml` from Parameter Store, and launches Sceptre. It does not change the image parameters.
 
-Run `make sync-vars` whenever `vars-dev.yaml` changes so the deploy project receives the new settings.
+Run `make sync-vars` whenever `vars-dev.yaml` changes so the deploy project receives the new
+settings.
 
-`make sync-vars` and `make promote` apply the stack tags and `Subservice: build` to their SSM parameters.
+`make sync-vars` and `make promote` apply the stack tags and `Subservice: build` to their SSM
+parameters.
 
 ### Deploying a local build
 
-To deploy the current checkout without going through the pipeline, build and push all three images with a local tag, promote that tag, and launch:
+To deploy the current checkout without going through the pipeline, build and push all three images
+with a local tag, promote that tag, and launch:
 
 ```bash
 export ECR_REGISTRY=<aws-account-id>.dkr.ecr.<region>.amazonaws.com
@@ -182,11 +315,16 @@ make promote SOURCE_TAG="$IMAGE_TAG"
 make launch
 ```
 
-The `local-` prefix keeps these builds apart from the pipeline's `sha-*` tags for the same commit. ECR tags are immutable, so pushing again after further uncommitted changes needs a new tag. Only the push targets need `ECR_REGISTRY`. The individual `push-batch`, `push-marple`, and `push-airflow` targets build and push one image.
+The `local-` prefix keeps these builds apart from the pipeline's `sha-*` tags for the same commit.
+ECR tags are immutable, so pushing again after further uncommitted changes needs a new tag. Only the
+push targets need `ECR_REGISTRY`. The individual `push-batch`, `push-marple`, and `push-airflow`
+targets build and push one image.
 
 ### Airflow image
 
-Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the Amazon and Slack providers installed from `uv.lock`. `versions.env` sets the Airflow version; `.python-version` sets Python.
+Airflow services and Fargate workers use a custom `apache/airflow:slim` image with COMET and the
+Amazon and Slack providers installed from `uv.lock`. `versions.env` sets the Airflow version;
+`.python-version` sets Python.
 
 ```bash
 make build-airflow         # build the image locally
@@ -200,23 +338,30 @@ make bump-airflow
 uv run --locked --extra airflow --group test pytest
 ```
 
-Commit `versions.env`, `pyproject.toml`, and `uv.lock` together. The main pipeline builds the new image set; promote its SHA or a subsequent release tag before launching the Airflow services.
+Commit `versions.env`, `pyproject.toml`, and `uv.lock` together. The main pipeline builds the new
+image set; promote its SHA or a subsequent release tag before launching the Airflow services.
 
-`make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or extras, edit the target before running it.
+`make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or
+extras, edit the target before running it.
 
 ### Configure Slack alerts
 
 Create a Slack channel for the alerts:
 
 1. In Slack, select **+ → Channel**, enter a name such as `airflow`, and create the channel.
-2. Open [Slack API Apps](https://api.slack.com/apps), select **Create New App → From scratch**, and choose the workspace.
+2. Open [Slack API Apps](https://api.slack.com/apps), select **Create New App → From scratch**, and
+   choose the workspace.
 3. Open **Incoming Webhooks** and enable **Activate Incoming Webhooks**.
 4. Select **Add New Webhook to Workspace**, choose the alert channel, and authorize it.
-5. Copy the generated `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` URL.
+5. Copy the generated
+   `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX` URL.
 
-Then store the webhook in the `comet-dev-airflow-slack-webhook` secret created by `make secrets`. ECS injects it into Fargate workers as `AIRFLOW_CONN_SLACK_DEFAULT`, providing the `slack_default` connection.
+Then store the webhook in the `comet-dev-airflow-slack-webhook` secret created by `make secrets`.
+ECS injects it into Fargate workers as `AIRFLOW_CONN_SLACK_DEFAULT`, providing the `slack_default`
+connection.
 
-In the Secrets Manager console, set the secret's value on the **Plaintext** tab to the connection as JSON:
+In the Secrets Manager console, set the secret's value on the **Plaintext** tab to the connection as
+JSON:
 
 ```json
 {"conn_type": "slackwebhook", "password": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"}
@@ -224,48 +369,63 @@ In the Secrets Manager console, set the secret's value on the **Plaintext** tab 
 
 #### Test Slack alerts
 
-The `slack_alert_test` entry in `dags/dags.yaml.example` is disabled by default. Enable it in the deployed `dags.yaml`, upload the file as described in [dags.md](dags.md), then unpause and trigger the DAG in Airflow. One task sends the success message immediately; the other sleeps past the two-minute deadline and then fails.
+The `slack_alert_test` entry in `dags/dags.yaml.example` is disabled by default. Enable it in the
+deployed `dags.yaml`, upload the file as described in [dags.md](dags.md), then unpause and trigger
+the DAG in Airflow. One task sends the success message immediately; the other sleeps past the
+two-minute deadline and then fails.
 
 ### Enrichment configuration
 
-Upload `configs/resource-type-general-reclassification-rules.yaml` from `comet-enrich` to the data bucket at `enrichment-configs/resource-type-general-reclassification-rules.yaml`. The object must exist before running the `datacite_enrich_resource_type_general` DAG.
+Upload `configs/resource-type-general-reclassification-rules.yaml` from `comet-enrich` to the data
+bucket at `enrichment-configs/resource-type-general-reclassification-rules.yaml`. The object must
+exist before running the `datacite_enrich_resource_type_general` DAG.
 
-Set `source_id` on each enrichment DAG's entry in `dags.yaml` to the enrichment project's DOI name, such as `10.1234/example`. Each DAG writes the value to the `sourceId` field of every output record. For an individual run, `source_id` can also be overridden in the Airflow UI when triggering the DAG.
+Set `source_id` on each enrichment DAG's entry in `dags.yaml` to the enrichment project's DOI name,
+such as `10.1234/example`. Each DAG writes the value to the `sourceId` field of every output record.
+For an individual run, `source_id` can also be overridden in the Airflow UI when triggering the DAG.
 
 ### DataCite credentials
 
-Configure the DataCite account ID and password in Secrets Manager for the `download-datacite` Batch job and in the `datacite` Airflow connection. Update both when rotating the credentials.
+Configure the DataCite account ID and password in Secrets Manager for the `download-datacite` Batch
+job and in the `datacite` Airflow connection. Update both when rotating the credentials.
 
-For the Batch job, set the value of the `comet-dev-batch-datacite-credentials` secret created by `make secrets` in the Secrets Manager console:
+For the Batch job, set the value of the `comet-dev-batch-datacite-credentials` secret created by
+`make secrets` in the Secrets Manager console:
 
 ```json
 {"account_id":"<id>","password":"<password>"}
 ```
 
-For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui)), go to Admin → Connections, and add a connection with these fields:
+For the DAG, open the Airflow UI (see [Open the Airflow UI](#open-the-airflow-ui)), go to Admin →
+Connections, and add a connection with these fields:
 
 - Connection Id: `datacite`
 - Connection Type: `Generic`
 - Login: the DataCite account ID
 - Password: the DataCite password
 
-Create the connection before running `datacite_ingest`; `fetch_release` fails if it is missing. `datacite_conn_name` defaults to `datacite`.
+Create the connection before running `datacite_ingest`; `fetch_release` fails if it is missing.
+`datacite_conn_name` defaults to `datacite`.
 
 ### Hugging Face publish credentials
 
-The `publish` Batch job uploads enrichment releases to a Hugging Face S3-compatible bucket and reads its credentials from Secrets Manager.
+The `publish` Batch job uploads enrichment releases to a Hugging Face S3-compatible bucket and reads
+its credentials from Secrets Manager.
 
-Set the value of the `comet-dev-batch-hf-credentials` secret created by `make secrets` in the Secrets Manager console:
+Set the value of the `comet-dev-batch-hf-credentials` secret created by `make secrets` in the
+Secrets Manager console:
 
 ```json
 {"access_key_id":"<key-id>","secret_access_key":"<secret-key>"}
 ```
 
-The Hugging Face bucket name and endpoint URL are set on the `datacite_publish` entry in `dags.yaml`.
+The Hugging Face bucket name and endpoint URL are set on the `datacite_publish` entry in
+`dags.yaml`.
 
 ### Stack status and deletion
 
-Show the status of all dev stacks, or one stack. `STACK` is the config path relative to the environment:
+Show the status of all dev stacks, or one stack. `STACK` is the config path relative to the
+environment:
 
 ```bash
 make status
@@ -280,11 +440,30 @@ make delete STACK=ec2.yaml
 
 ### Templates
 
-Sceptre templates are Jinja2 (`.j2`): Sceptre renders the Jinja first, then deploys the resulting CloudFormation. Wrap literal `{{...}}` values (e.g. `{{resolve:secretsmanager:...}}`) in `{% raw %}...{% endraw %}` so Jinja doesn't evaluate them.
+Sceptre templates are Jinja2 (`.j2`): Sceptre renders the Jinja first, then deploys the resulting
+CloudFormation. Wrap literal `{{...}}` values (e.g. `{{resolve:secretsmanager:...}}`) in
+`{% raw %}...{% endraw %}` so Jinja doesn't evaluate them.
+
+## Batch AMI
+
+The Batch compute environments run the latest ECS-optimized Amazon Linux 2023 AMI. Each deploy reads
+the AMI ID from AWS's public SSM parameter, set by `latest_ami_parameter` in
+`infra/config/config.yaml`, so deploying `batch-platform` moves Batch onto a newer AMI when there is
+one. `make diff` shows this as a change to `BatchImageId`.
+
+Batch updates the compute environments in place. Running jobs finish on their current instances, and
+new jobs start on the new AMI. Jobs still running after 5 days, the longest Batch allows, are
+stopped, so deploy while the queues are quiet.
+
+The monitor checks once a day, just after midnight UTC, whether Batch is on the latest AMI. The
+`batch-ami-behind` alarm notifies the alert topic when a newer AMI is available, and clears at the
+first check after a deploy. If the check stops reporting, the alarm goes to insufficient data and
+notifies the alert topic too.
 
 ## Dev EC2 instance
 
-The dev instance is managed by an Auto Scaling Group (`comet-dev-ec2-asg`) that defaults to zero instances, so the stack stays deployed while nothing is running. Start and stop it with:
+The dev instance is managed by an Auto Scaling Group (`comet-dev-ec2-asg`) that defaults to zero
+instances, so the stack stays deployed while nothing is running. Start and stop it with:
 
 ```bash
 make dev-up        # start the instance
@@ -292,16 +471,28 @@ make dev-status    # show desired capacity, instance ID, and suspended processes
 make dev-down      # terminate the instance
 ```
 
-After changing the AMI, instance type, or launch template, run `make launch STACK=ec2.yaml` to update the Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current instance, run `make dev-refresh`, which replaces it with one using the new configuration.
+Each new instance starts from the latest Amazon Linux 2023 AMI. Instances don't run `dnf update` at
+boot, so run `make dev-refresh` to pick up OS patches.
 
-A scheduled action sets the desired capacity to zero each night, preventing forgotten instances from continuing to run. The hour and time zone come from `instance_shutdown_hour` and `instance_shutdown_timezone` in `vars-dev.yaml`. For work that must run overnight, use `make dev-keepalive` to disable the nightly shutdown schedule. Run `make dev-autostop` to re-enable it. Re-enabling the schedule does not trigger a missed shutdown, so if you re-enable it after the scheduled shutdown time, the instance will continue running until the following night.
+After changing the instance type or launch template, run `make launch STACK=ec2.yaml` to update the
+Auto Scaling Group. This affects only newly launched instances. To apply the changes to the current
+instance, run `make dev-refresh`, which replaces it with one using the new configuration.
 
-Scaling down, refreshing, and the nightly shutdown all terminate the instance, which wipes the NVMe `/data` volume.
+A scheduled action sets the desired capacity to zero each night, preventing forgotten instances from
+continuing to run. The hour and time zone come from `instance_shutdown_hour` and
+`instance_shutdown_timezone` in `vars-dev.yaml`. For work that must run overnight, use
+`make dev-keepalive` to disable the nightly shutdown schedule. Run `make dev-autostop` to re-enable
+it. Re-enabling the schedule does not trigger a missed shutdown, so if you re-enable it after the
+scheduled shutdown time, the instance will continue running until the following night.
+
+Scaling down, refreshing, and the nightly shutdown all terminate the instance, which wipes the NVMe
+`/data` volume.
 
 ## Open the Airflow UI
 
-The Airflow UI is reached by port-forwarding using the AWS session manager. The `scripts/airflow-ui.sh` script finds the 
-environment's ECS cluster and running api-server Fargate task, then forwards the UI to a local port.
+The Airflow UI is reached by port-forwarding using the AWS session manager. The
+`scripts/airflow-ui.sh` script finds the environment's ECS cluster and running api-server Fargate
+task, then forwards the UI to a local port.
 
 From the repository root, start forwarding:
 
@@ -309,31 +500,43 @@ From the repository root, start forwarding:
 bash scripts/airflow-ui.sh
 ```
 
-The script accepts optional environment and local-port arguments, defaulting to `dev` and `8080`. If port 8080 is occupied, use `bash scripts/airflow-ui.sh dev 8081` and open <http://localhost:8081>. Keep the terminal open while using Airflow; press Ctrl-C to stop forwarding.
+The script accepts optional environment and local-port arguments, defaulting to `dev` and `8080`. If
+port 8080 is occupied, use `bash scripts/airflow-ui.sh dev 8081` and open <http://localhost:8081>.
+Keep the terminal open while using Airflow; press Ctrl-C to stop forwarding.
 
-Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Manager console, in the comet-dev-airflow stack's `-admin-password` secret. The api-server resets the admin password to this secret on each start. You can then create
-your own username and password to login after that.
+Log in at <http://localhost:8080> as `admin`. The password is in the Secrets Manager console, in the
+comet-dev-airflow stack's `-admin-password` secret. The api-server resets the admin password to this
+secret on each start. You can then create your own username and password to login after that.
 
 ## Logs
 
 - Airflow service containers: CloudWatch `/comet/<env>/ecs/airflow`, one stream per container.
 - Fargate workers: CloudWatch `/comet/<env>/ecs/airflow-worker`.
 - Airflow task logs (what the UI shows): `s3://<stackname>-airflow-logs/logs/`, kept for one year.
-- Batch jobs: CloudWatch `/comet/<env>/batch/job`. The output of single-container jobs is also copied into the Airflow task log.
+- Batch jobs: CloudWatch `/comet/<env>/batch/job`. The output of single-container jobs is also
+  copied into the Airflow task log.
 
 ## Recovering a failed enrichment
 
-Failure details are available in the [Batch logs](#logs). Partial output may be available at `s3://<data-bucket>/{dag_id}/{run_id}/full/`. Retrying the failed `enrich` task in Airflow replaces that run's output.
+Failure details are available in the [Batch logs](#logs). Partial output may be available at
+`s3://<data-bucket>/{dag_id}/{run_id}/full/`. Retrying the failed `enrich` task in Airflow replaces
+that run's output.
 
 ## Re-running a published release
 
-A published release can be replaced by re-running its enrichment DAG with `datacite_release_date` set to the DataCite release date and `replace_published` enabled. For funders and affiliations, also set `ror_release_date` to the ROR release used by the original run. The source snapshots must still be available. Publishing the replacement overwrites the existing Hugging Face release folders and updates the release index.
+A published release can be replaced by re-running its enrichment DAG with `datacite_release_date`
+set to the DataCite release date and `replace_published` enabled. For funders and affiliations, also
+set `ror_release_date` to the ROR release used by the original run. The source snapshots must still
+be available. Publishing the replacement overwrites the existing Hugging Face release folders and
+updates the release index.
 
 **Warning:** Replacing releases out of order can invalidate subsequent diffs.
 
 ## Rotating the Fernet key
 
-The Fernet key lives in the `comet-dev-airflow-fernet` Secrets Manager secret, created outside CloudFormation and passed in by ARN (`fernet_secret_arn` in `vars-dev.yaml`), so stack updates and deletes never touch it.
+The Fernet key lives in the `comet-dev-airflow-fernet` Secrets Manager secret, created outside
+CloudFormation and passed in by ARN (`fernet_secret_arn` in `vars-dev.yaml`), so stack updates and
+deletes never touch it.
 
 Generate a key with:
 
@@ -341,11 +544,17 @@ Generate a key with:
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-One-time setup: set the value of the secret created by `make secrets` to a generated key in the Secrets Manager console.
+One-time setup: set the value of the secret created by `make secrets` to a generated key in the
+Secrets Manager console.
 
 To rotate, in the Secrets Manager console:
 
-1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with `make launch STACK=airflow-services.yaml` (its hook runs the init task, which re-encrypts everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by hand.
+1. Set the secret value to `<new key>,<old key>`, then run the init task — redeploy with
+   `make launch STACK=airflow-services.yaml` (its hook runs the init task, which re-encrypts
+   everything with the new key whenever it sees a comma), or run `infra/scripts/airflow-init.sh` by
+   hand.
 2. Once it succeeds, set the value to just `<new key>` and run it again.
 
-Don't do step 2 until step 1's deploy is healthy: while the value is `new,old`, Airflow encrypts with the new key and decrypts with either, so a partial re-encrypt is safe; dropping the old key early would orphan rows not yet re-encrypted.
+Don't do step 2 until step 1's deploy is healthy: while the value is `new,old`, Airflow encrypts
+with the new key and decrypts with either, so a partial re-encrypt is safe; dropping the old key
+early would orphan rows not yet re-encrypted.

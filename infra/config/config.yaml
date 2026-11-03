@@ -5,3 +5,17 @@ project_code: comet
 stack_tags: {{ dict(var.stack_tags, Environment=var.env, Service='comet') | tojson }}
 # Stacks add Subservice on top of these tags instead of replacing them.
 stack_tags_inheritance: merge
+
+# Versions of what CloudFormation deploys. Versions built into the images are in versions.env.
+versions:
+  # Must match the OpenSearch client in Marple (MARPLE_SHA in versions.env).
+  opensearch: 3.9.0
+  postgres: '17'
+  lambda_python: python3.13
+  # Docker CLI plugins installed on the dev instance.
+  docker_compose: 5.4.0
+  docker_buildx: 0.35.0
+
+# AWS's public SSM parameter with the latest ECS-optimized AL2023 AMI. Batch moves onto it at each deploy,
+# and the monitor alarms when Batch is behind it.
+latest_ami_parameter: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id

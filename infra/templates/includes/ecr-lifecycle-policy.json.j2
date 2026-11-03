@@ -28,6 +28,19 @@
     },
     {
       "rulePriority": 3,
+      "description": "Retain the newest 10 patch builds (X.Y.Z-<UTC timestamp>)",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPatternList": ["*.*-*T*Z"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 10
+      },
+      "action": {
+        "type": "expire"
+      }
+    },
+    {
+      "rulePriority": 4,
       "description": "Retain the newest 3 untagged images",
       "selection": {
         "tagStatus": "untagged",

@@ -10,6 +10,8 @@ parameters:
   Env: "{{ var.env }}"
   FernetSecretArn: "{{ var.fernet_secret_arn }}"
   SlackWebhookSecretArn: "{{ var.slack_webhook_secret_arn }}"
+  SsmPrefix: "{{ var.ssm_prefix }}"
+  LatestAmiParameter: {{ stack_group_config.latest_ami_parameter }}
 
 capabilities:
   - CAPABILITY_IAM

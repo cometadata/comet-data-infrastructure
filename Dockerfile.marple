@@ -4,10 +4,12 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 ARG PYTHON_VERSION
 
+RUN dnf upgrade -y --releasever=latest && \
+    dnf install -y git tar gzip python${PYTHON_VERSION} && \
+    dnf clean all
+
 # Pull uv into the image
 COPY --from=uv /uv /uvx /bin/
-
-RUN dnf install -y git tar gzip python${PYTHON_VERSION} && dnf clean all
 
 RUN uv venv --python ${PYTHON_VERSION} /opt/venv
 ENV VIRTUAL_ENV=/opt/venv

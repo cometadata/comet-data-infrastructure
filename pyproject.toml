@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "comet"
-version = "0.2.3"
+version = "0.3.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "boto3>=1,<2",
@@ -20,7 +20,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [{include-group = "test"}, {include-group = "lint"}]
-lint = ["ruff>=0.9"]
+lint = [
+    "ruff>=0.9",
+    "rumdl>=0.3.2",
+]
 test = [
     "aiohttp>=3.12.14",
     "jinja2>=3,<4",
@@ -40,7 +43,7 @@ notebooks = [
 airflow = [
     "apache-airflow-providers-amazon[aiobotocore]>=9.34.0",
     "apache-airflow-providers-slack>=9.10.2,<10",
-    "apache-airflow[amazon,fab,postgres,standard]==3.3.1",
+    "apache-airflow[amazon,fab,postgres,standard]==3.4.0rc2",
 ]
 
 [project.scripts]

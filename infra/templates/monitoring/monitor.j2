@@ -12,6 +12,13 @@ Parameters:
   ClusterName:
     Type: String
 
+  LambdaPythonRuntime:
+    Type: String
+
+  # The public SSM parameter holding the latest ECS-optimized AMI ID.
+  LatestAmiParameter:
+    Type: String
+
   FargateWorkerTaskDefinitionArn:
     Type: String
 
@@ -39,8 +46,9 @@ Resources:
       LogGroupName: !Sub '/comet/${Env}/lambda/monitor'
       RetentionInDays: 14
 
-  # Allows the monitor function to write logs, describe EC2 instances and ECS
-  # tasks, and publish CloudWatch metrics.
+  # Allows the monitor function to write logs, describe EC2 instances, ECS
+  # tasks and Batch compute environments, read the latest ECS AMI, and publish
+  # CloudWatch metrics.
   MonitorRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -75,6 +83,14 @@ Resources:
                   ArnEquals:
                     'ecs:cluster': !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
               - Effect: Allow
+                Action:
+                  - 'batch:DescribeJobQueues'
+                  - 'batch:DescribeComputeEnvironments'
+                Resource: '*'
+              - Effect: Allow
+                Action: 'ssm:GetParameter'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter${LatestAmiParameter}'
+              - Effect: Allow
                 Action: 'cloudwatch:PutMetricData'
                 Resource: '*'
                 Condition:
@@ -83,13 +99,13 @@ Resources:
 
   # Monitors COMET compute resources across EC2 and ECS. Each run reports the
   # oldest active compute resource, recent EC2 and Fargate worker launches,
-  # running Fargate service tasks, and service tasks stopped by essential
-  # container failures.
+  # running Fargate service tasks, service tasks stopped by essential
+  # container failures, and whether Batch runs the latest ECS AMI.
   MonitorFunction:
     Type: 'AWS::Lambda::Function'
     Properties:
       Description: 'Publishes compute age, launch-rate, and Airflow service metrics'
-      Runtime: python3.13
+      Runtime: !Ref LambdaPythonRuntime
       Handler: index.handler
       MemorySize: 128
       ReservedConcurrentExecutions: 1
@@ -102,11 +118,13 @@ Resources:
           CLUSTER_NAME: !Ref ClusterName
           ENVIRONMENT: !Ref Env
           FARGATE_WORKER_TASK_DEFINITION_ARN: !Ref FargateWorkerTaskDefinitionArn
+          LATEST_AMI_PARAMETER: !Ref LatestAmiParameter
           METRIC_NAMESPACE: !Ref MetricNamespace
           SERVICE_TAG_VALUE: '{{ sceptre_user_data.stack_tags.Service }}'
       Code:
         ZipFile: |
           import datetime
+          import logging
           import os
 
           import boto3
@@ -117,9 +135,12 @@ Resources:
           LAUNCH_LOOKBACK = datetime.timedelta(minutes=10)
           NAMESPACE = os.environ["METRIC_NAMESPACE"]
           SERVICE_TAG = os.environ["SERVICE_TAG_VALUE"]
+          LATEST_AMI_PARAMETER = os.environ["LATEST_AMI_PARAMETER"]
 
+          batch = boto3.client("batch")
           ec2 = boto3.client("ec2")
           ecs = boto3.client("ecs")
+          ssm = boto3.client("ssm")
           cloudwatch = boto3.client("cloudwatch")
 
 
@@ -131,6 +152,30 @@ Resources:
               for start in range(0, len(arns), 100):
                   tasks.extend(ecs.describe_tasks(cluster=CLUSTER, tasks=arns[start : start + 100])["tasks"])
               return tasks
+
+
+          def batch_ami_behind():
+              """1 if any of the environment's Batch compute environments isn't on the latest ECS AMI, else 0."""
+              latest = ssm.get_parameter(Name=LATEST_AMI_PARAMETER)["Parameter"]["Value"]
+              # Job queues are named comet-<env>-batch-<name>-job-queue in batch-platform.j2.
+              arns = [
+                  order["computeEnvironment"]
+                  for page in batch.get_paginator("describe_job_queues").paginate()
+                  for queue in page["jobQueues"]
+                  if queue["jobQueueName"].startswith(f"comet-{ENVIRONMENT}-batch-")
+                  for order in queue["computeEnvironmentOrder"]
+              ]
+              environments = (
+                  batch.describe_compute_environments(computeEnvironments=arns)["computeEnvironments"] if arns else []
+              )
+              amis = {
+                  config.get("imageIdOverride")
+                  for environment in environments
+                  for config in environment["computeResources"].get("ec2Configuration", [])
+              }
+              behind = bool(amis - {latest})
+              logging.warning("Batch AMI %s: running %s, latest %s", "behind" if behind else "up to date", amis, latest)
+              return int(behind)
 
 
           def handler(event, context):
@@ -197,6 +242,13 @@ Resources:
                   "FargateServiceTaskCount": service_tasks,
                   "CrashedServiceTasks": crashed,
               }
+              # The AMI check runs once a day, in the first run after midnight UTC. A failed check only drops
+              # its own metric, so the alarms on the others don't fire.
+              if now.hour == 0 and now.minute < 5:
+                  try:
+                      metrics["BatchAmiBehind"] = batch_ami_behind()
+                  except Exception:
+                      logging.exception("Batch AMI check failed")
               cloudwatch.put_metric_data(
                   Namespace=NAMESPACE,
                   MetricData=[
@@ -337,6 +389,30 @@ Resources:
       TreatMissingData: breaching
       AlarmActions: [ !Ref AlertTopicArn ]
       OKActions: [ !Ref AlertTopicArn ]
+
+  # Alarm when a Batch compute environment isn't on the latest ECS AMI. Deploying
+  # moves it onto the latest. The check reports once a day; if it stops reporting,
+  # the alarm goes to INSUFFICIENT_DATA and notifies the alert topic.
+  BatchAmiBehindAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-batch-ami-behind'
+      AlarmDescription: 'A newer ECS AMI is available for Batch; deploy batch-platform to use it'
+      Namespace: !Ref MetricNamespace
+      MetricName: BatchAmiBehind
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+      AlarmActions: [ !Ref AlertTopicArn ]
+      OKActions: [ !Ref AlertTopicArn ]
+      InsufficientDataActions: [ !Ref AlertTopicArn ]
 
   # Alarm when one or more Airflow service tasks report an essential container
   # failure for two consecutive 5-minute periods.

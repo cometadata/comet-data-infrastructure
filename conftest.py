@@ -9,3 +9,5 @@ import os
 
 os.environ.setdefault("COMET_ENV", "test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
+# Matches the deployed Airflow config (common_env in infra/templates/airflow.j2).
+os.environ.setdefault("AIRFLOW__SCHEDULER__BATCH_ASSET_EVENTS", "True")

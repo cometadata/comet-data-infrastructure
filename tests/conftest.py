@@ -32,6 +32,12 @@ STUB_USER_DATA = {
 }
 
 
+def render_root_config(variables):
+    """Render infra/config/config.yaml, the stack group config every stack inherits."""
+    template = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string((CONFIG_DIR / "config.yaml").read_text())
+    return yaml.safe_load(template.render(var=variables))
+
+
 def example_variables():
     """Load vars-dev.yaml.example and fill in the bootstrap ARNs it leaves empty."""
     variables = yaml.safe_load((PROJECT_DIR / "vars-dev.yaml.example").read_text())
@@ -119,7 +125,7 @@ def tag_values(node, key):
 def stack_configs():
     """Render Sceptre configs, keyed by stack path."""
     variables = example_variables()
-    stack_group_config = {"sceptre_user_data": {"ssm_path": "/comet/dev"}}
+    stack_group_config = {**render_root_config(variables), "sceptre_user_data": {"ssm_path": "/comet/dev"}}
     configs = {}
     for path in sorted((CONFIG_DIR / "dev").glob("**/*.yaml")):
         if path.name == "config.yaml":

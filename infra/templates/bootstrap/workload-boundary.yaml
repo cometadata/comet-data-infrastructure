@@ -20,6 +20,14 @@ Parameters:
   SlackWebhookSecretArn:
     Type: String
 
+  # SSM Parameter Store path prefix; must match ssm_prefix in vars-dev.yaml.
+  SsmPrefix:
+    Type: String
+
+  # SSM parameter with the latest ECS-optimized AMI; must match latest_ami_parameter in infra/config/config.yaml.
+  LatestAmiParameter:
+    Type: String
+
 Resources:
   WorkloadBoundary:
     Type: 'AWS::IAM::ManagedPolicy'
@@ -34,6 +42,8 @@ Resources:
           - Sid: 'HostAgentAndDiscoveryActions'
             Effect: 'Allow'
             Action:
+              - 'batch:DescribeComputeEnvironments'
+              - 'batch:DescribeJobQueues'
               - 'batch:DescribeJobs'
               - 'cloudwatch:PutMetricData'
               - 'ec2:Describe*'
@@ -81,7 +91,11 @@ Resources:
             Action:
               - 'batch:*'
               - 'codebuild:*'
+              - 'codeconnections:GetConnection'
+              - 'codeconnections:GetConnectionToken'
               - 'codeconnections:UseConnection'
+              - 'codestar-connections:GetConnection'
+              - 'codestar-connections:GetConnectionToken'
               - 'codestar-connections:UseConnection'
               - 'dynamodb:*'
               - 'ecr:*'
@@ -90,6 +104,7 @@ Resources:
               - 's3:*'
               - 'secretsmanager:DescribeSecret'
               - 'secretsmanager:GetSecretValue'
+              - 'sns:Publish'
               - 'ssm:GetParameter*'
             Resource:
               - !Sub 'arn:${AWS::Partition}:batch:${AWS::Region}:${AWS::AccountId}:job-definition/comet-${Env}-*'
@@ -104,7 +119,12 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/comet-${Env}-*/*'
               - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/comet/${Env}/*'
               - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:comet-${Env}-*'
+              - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:comet-${Env}-*'
               - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/AmazonCloudWatch-*'
+              # The latest ECS-optimized AMI, read by the monitor.
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::parameter${LatestAmiParameter}'
+              # The promoted image tag, read by patch builds.
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/${Env}/images/tag'
               - !Sub 'arn:${AWS::Partition}:s3:::comet-${Env}-*'
               - !Sub 'arn:${AWS::Partition}:s3:::arxiv'
               - !Sub 'arn:${AWS::Partition}:s3:::arxiv/*'

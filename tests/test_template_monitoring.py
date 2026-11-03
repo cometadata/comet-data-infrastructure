@@ -15,8 +15,28 @@ from conftest import (
     alarm_metrics,
     example_variables,
     metric_resource_target,
+    render_root_config,
     resources_of_type,
 )
+
+LATEST_AMI_PARAMETER = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
+
+
+def batch_ami_clients(running_ami=None, latest_ami="ami-latest"):
+    """Batch and SSM stubs for the monitor's AMI check: one compute environment on running_ami, or none."""
+    queues = []
+    if running_ami:
+        queues = [
+            {"jobQueueName": "comet-dev-batch-download-job-queue", "computeEnvironmentOrder": [{"computeEnvironment": "ce"}]}
+        ]
+    environment = {"computeResources": {"ec2Configuration": [{"imageIdOverride": running_ami}]}}
+    return {
+        "batch": SimpleNamespace(
+            get_paginator=lambda name: SimpleNamespace(paginate=lambda **kwargs: [{"jobQueues": queues}]),
+            describe_compute_environments=lambda computeEnvironments: {"computeEnvironments": [environment]},
+        ),
+        "ssm": SimpleNamespace(get_parameter=lambda Name: {"Parameter": {"Value": latest_ami}}),
+    }
 
 
 class TestAlarms:
@@ -121,6 +141,10 @@ class TestMonitor:
             if alarm["Properties"].get("Namespace") == TaggedValue("Ref", "MetricNamespace")
         ]
 
+    @pytest.fixture(autouse=True)
+    def latest_ami_parameter(self, monkeypatch):
+        monkeypatch.setenv("LATEST_AMI_PARAMETER", LATEST_AMI_PARAMETER)
+
     def test_monitor_runs_every_five_minutes(self, rendered_templates):
         rule = rendered_templates["monitoring/monitor.j2"]["Resources"]["ScheduleRule"]
 
@@ -151,16 +175,22 @@ class TestMonitor:
             "stack_output", "dev/airflow.yaml::AirflowWorkerTaskDefArn"
         )
 
-    def test_alarms_fire_when_the_monitor_stops_publishing(self, custom_monitor_alarms):
-        not_breaching = [
+    def test_alarms_report_when_the_monitor_stops_publishing(self, custom_monitor_alarms):
+        # Health alarms fire on missing data; the others notify that their data stopped.
+        silent = [
             logical_id
             for _, logical_id, alarm in custom_monitor_alarms
             if alarm["Properties"].get("TreatMissingData") != "breaching"
+            and not alarm["Properties"].get("InsufficientDataActions")
         ]
-        assert not not_breaching, f"monitor alarms without the dead-man switch: {not_breaching}"
+        assert not silent, f"monitor alarms that stay silent when their data stops: {silent}"
 
     def test_custom_health_alarms_require_two_five_minute_periods(self, custom_monitor_alarms):
-        alarms = [alarm["Properties"] for _, _, alarm in custom_monitor_alarms]
+        alarms = [
+            alarm["Properties"]
+            for _, _, alarm in custom_monitor_alarms
+            if alarm["Properties"].get("TreatMissingData") == "breaching"
+        ]
 
         assert len(alarms) == 5
         for alarm in alarms:
@@ -242,7 +272,7 @@ class TestMonitor:
             "ecs": EcsClient(),
             "cloudwatch": cloudwatch,
         }
-        monkeypatch.setattr(boto3, "client", clients.__getitem__)
+        monkeypatch.setattr(boto3, "client", {**clients, **batch_ami_clients()}.__getitem__)
         monkeypatch.setenv("CLUSTER_NAME", "test-cluster")
         monkeypatch.setenv(
             "FARGATE_WORKER_TASK_DEFINITION_ARN",
@@ -276,6 +306,38 @@ class TestMonitor:
         expected_dimension = [{"Name": "Environment", "Value": TaggedValue("Ref", "Env")}]
         for _, _, alarm in custom_monitor_alarms:
             assert alarm["Properties"]["Dimensions"] == expected_dimension
+
+    @pytest.mark.parametrize(
+        ("hour", "running_ami", "expected"),
+        [(0, "ami-old", 1), (0, "ami-latest", 0), (12, "ami-old", None)],
+    )
+    def test_checks_the_batch_ami_once_a_day(self, rendered_templates, monkeypatch, hour, running_ami, expected):
+        code = rendered_templates["monitoring/monitor.j2"]["Resources"]["MonitorFunction"]["Properties"]["Code"]["ZipFile"]
+        empty_pages = SimpleNamespace(paginate=lambda **kwargs: [{"Reservations": [], "taskArns": []}])
+        clients = {
+            "ec2": SimpleNamespace(get_paginator=lambda name: empty_pages),
+            "ecs": SimpleNamespace(get_paginator=lambda name: empty_pages),
+            "cloudwatch": SimpleNamespace(put_metric_data=lambda **kwargs: None),
+            **batch_ami_clients(running_ami),
+        }
+        monkeypatch.setattr(boto3, "client", clients.__getitem__)
+        monkeypatch.setenv("CLUSTER_NAME", "test-cluster")
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("FARGATE_WORKER_TASK_DEFINITION_ARN", "arn:aws:ecs:us-east-1:1:task-definition/worker:1")
+        monkeypatch.setenv("METRIC_NAMESPACE", "Comet/Monitoring")
+        monkeypatch.setenv("SERVICE_TAG_VALUE", STUB_USER_DATA["stack_tags"]["Service"])
+
+        namespace = {}
+        exec(code, namespace)
+        now = datetime.datetime(2026, 7, 31, hour, 2, tzinfo=datetime.timezone.utc)
+
+        class FixedDateTime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+
+        namespace["datetime"] = SimpleNamespace(datetime=FixedDateTime, timezone=datetime.timezone)
+        assert namespace["handler"]({}, None).get("BatchAmiBehind") == expected
 
     def test_counts_only_service_tasks_that_are_actually_running(self, rendered_templates, monkeypatch):
         function = rendered_templates["monitoring/monitor.j2"]["Resources"]["MonitorFunction"]
@@ -317,7 +379,7 @@ class TestMonitor:
             "ecs": EcsClient(),
             "cloudwatch": SimpleNamespace(put_metric_data=lambda **kwargs: None),
         }
-        monkeypatch.setattr(boto3, "client", clients.__getitem__)
+        monkeypatch.setattr(boto3, "client", {**clients, **batch_ami_clients()}.__getitem__)
         monkeypatch.setenv("CLUSTER_NAME", "test-cluster")
         monkeypatch.setenv("ENVIRONMENT", "dev")
         monkeypatch.setenv("FARGATE_WORKER_TASK_DEFINITION_ARN", task_definition_arn)
@@ -364,7 +426,7 @@ class TestMonitor:
             "ecs": EcsClient(),
             "cloudwatch": SimpleNamespace(put_metric_data=lambda **kwargs: None),
         }
-        monkeypatch.setattr(boto3, "client", clients.__getitem__)
+        monkeypatch.setattr(boto3, "client", {**clients, **batch_ami_clients()}.__getitem__)
         monkeypatch.setenv("CLUSTER_NAME", "test-cluster")
         monkeypatch.setenv("ENVIRONMENT", "dev")
         monkeypatch.setenv(
@@ -479,7 +541,7 @@ class TestMonitor:
             "ecs": EcsClient(),
             "cloudwatch": cloudwatch,
         }
-        monkeypatch.setattr(boto3, "client", clients.__getitem__)
+        monkeypatch.setattr(boto3, "client", {**clients, **batch_ami_clients()}.__getitem__)
         monkeypatch.setenv("CLUSTER_NAME", "test-cluster")
         monkeypatch.setenv("ENVIRONMENT", "dev")
         monkeypatch.setenv("FARGATE_WORKER_TASK_DEFINITION_ARN", f"{worker_family_arn}:9")
@@ -640,13 +702,9 @@ class TestMonitoringConfig:
         assert config["sceptre_user_data"]["alert_emails"] == ["alerts@example.org"]
 
     def test_environment_and_service_tags_are_injected_into_stack_tags(self, config_template, config_variables):
-        root_config_template = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(
-            (PROJECT_DIR / "infra" / "config" / "config.yaml").read_text()
-        )
-
         assert not {"Environment", "Service"} & set(config_variables["stack_tags"])
         expected = {**config_variables["stack_tags"], "Environment": "dev", "Service": "comet"}
-        root_config = yaml.safe_load(root_config_template.render(var=config_variables))
+        root_config = render_root_config(config_variables)
         environment_config = yaml.load(config_template.render(var=config_variables), Loader=TaggedLoader)
 
         assert root_config["stack_tags"] == expected
