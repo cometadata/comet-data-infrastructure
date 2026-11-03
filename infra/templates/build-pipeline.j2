@@ -37,6 +37,10 @@ Parameters:
   AlertTopicArn:
     Type: String
 
+  # SSM Parameter Store path prefix; must match ssm_prefix in vars-dev.yaml.
+  SsmPrefix:
+    Type: String
+
   ComputeType:
     Type: String
     Default: 'BUILD_GENERAL1_MEDIUM'
@@ -113,12 +117,29 @@ Resources:
               - Effect: 'Allow'
                 Action: 'ecr:GetAuthorizationToken'
                 Resource: '*'
+              # Patch builds clone the release with CODEBUILD_CLONE_REF, which fetches a connection token.
+              - Effect: 'Allow'
+                Action:
+                  - 'codeconnections:GetConnection'
+                  - 'codeconnections:GetConnectionToken'
+                  - 'codeconnections:UseConnection'
+                  - 'codestar-connections:GetConnection'
+                  - 'codestar-connections:GetConnectionToken'
+                  - 'codestar-connections:UseConnection'
+                Resource: !Ref CodeConnectionArn
+              # Patch builds compare scans with the promoted images and post the summary.
+              - Effect: 'Allow'
+                Action: 'ssm:GetParameter'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/${Env}/images/tag'
+              - Effect: 'Allow'
+                Action: 'sns:Publish'
+                Resource: !Ref AlertTopicArn
 
   BuildProject:
     Type: 'AWS::CodeBuild::Project'
     Properties:
       Name: !Sub '${AWS::StackName}-images'
-      Description: 'Builds and releases the COMET container images'
+      Description: 'Builds, releases, and patches the COMET container images'
       ServiceRole: !GetAtt BuildRole.Arn
       QueuedTimeoutInMinutes: 60
       TimeoutInMinutes: !Ref BuildTimeoutMinutes
@@ -140,6 +161,13 @@ Resources:
             Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com'
           - Name: 'ENV'
             Value: !Ref Env
+          - Name: 'ALERT_TOPIC_ARN'
+            Value: !Ref AlertTopicArn
+          - Name: 'SSM_PREFIX'
+            Value: !Ref SsmPrefix
+          # Patch builds upload their Trivy reports here, under patch-scans/.
+          - Name: 'ARTIFACT_BUCKET'
+            Value: !Ref ArtifactBucketName
       LogsConfig:
         CloudWatchLogs:
           GroupName: !Ref LogGroup
@@ -286,24 +314,63 @@ Resources:
               InputArtifacts:
                 - Name: 'SourceArtifact'
 
-  BuildPipelineNotifications:
-    Type: 'AWS::CodeStarNotifications::NotificationRule'
+  # Started manually by `make patch-build`; rebuilds RELEASE_TAG with fresh system packages.
+  PatchPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
     Properties:
-      Name: !Sub '${AWS::StackName}-notifications'
-      Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${BuildPipeline}'
-      DetailType: 'BASIC'
-      EventTypeIds:
-        - 'codepipeline-pipeline-pipeline-execution-failed'
-        - 'codepipeline-pipeline-pipeline-execution-succeeded'
-      Targets:
-        - TargetAddress: !Ref AlertTopicArn
-          TargetType: 'SNS'
+      Name: !Sub '${AWS::StackName}-patch'
+      PipelineType: 'V2'
+      ExecutionMode: 'QUEUED'
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: 'S3'
+        Location: !Ref ArtifactBucketName
+      # CodePipeline rejects empty variable values, so `latest` selects the newest release tag.
+      Variables:
+        - Name: 'RELEASE_TAG'
+          DefaultValue: 'latest'
+          Description: 'Release tag to rebuild, such as v0.3.0, or latest'
+      Stages:
+        - Name: 'Source'
+          Actions:
+            - Name: 'Source'
+              Namespace: 'SourceVariables'
+              ActionTypeId:
+                Category: 'Source'
+                Owner: 'AWS'
+                Provider: 'CodeStarSourceConnection'
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref CodeConnectionArn
+                FullRepositoryId: !Ref RepositoryId
+                BranchName: !Ref BranchName
+                DetectChanges: false
+                # A Git clone, so the build can check out the release tag.
+                OutputArtifactFormat: 'CODEBUILD_CLONE_REF'
+              OutputArtifacts:
+                - Name: 'SourceArtifact'
+        - Name: 'Build'
+          Actions:
+            - Name: 'PatchImages'
+              ActionTypeId:
+                Category: 'Build'
+                Owner: 'AWS'
+                Provider: 'CodeBuild'
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildProject
+                EnvironmentVariables: |
+                  [{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"},{"name":"RELEASE_TAG","value":"#{variables.RELEASE_TAG}","type":"PLAINTEXT"},{"name":"PIPELINE_MODE","value":"patch","type":"PLAINTEXT"}]
+              InputArtifacts:
+                - Name: 'SourceArtifact'
+{%- for pipeline, suffix in [('Build', ''), ('Release', '-release'), ('Patch', '-patch')] %}
+{%- set pipeline_ref = '${' ~ pipeline ~ 'Pipeline}' %}
 
-  ReleasePipelineNotifications:
+  {{ pipeline }}PipelineNotifications:
     Type: 'AWS::CodeStarNotifications::NotificationRule'
     Properties:
-      Name: !Sub '${AWS::StackName}-release-notifications'
-      Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ReleasePipeline}'
+      Name: !Sub '${AWS::StackName}{{ suffix }}-notifications'
+      Resource: !Sub 'arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:{{ pipeline_ref }}'
       DetailType: 'BASIC'
       EventTypeIds:
         - 'codepipeline-pipeline-pipeline-execution-failed'
@@ -311,3 +378,4 @@ Resources:
       Targets:
         - TargetAddress: !Ref AlertTopicArn
           TargetType: 'SNS'
+{%- endfor %}

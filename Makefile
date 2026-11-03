@@ -12,7 +12,7 @@ ENV ?= dev
 # tag such as IMAGE_TAG=local-1 because ECR tags cannot be overwritten.
 IMAGE_TAG ?= sha-$(shell git rev-parse --short=7 HEAD)
 # User-supplied values are read by the shell, never expanded into recipe text by Make.
-export ENV IMAGE_TAG ECR_REGISTRY SOURCE_TAG VERSION_TAG SKIP_EXISTING STACK YES
+export ENV IMAGE_TAG ECR_REGISTRY SOURCE_TAG VERSION_TAG SKIP_EXISTING STACK YES RELEASE
 
 UV_RUN = uv run --locked --no-active
 UV_INFRA = uv run --project infra --locked --no-active
@@ -27,12 +27,12 @@ help:
 > @echo "Usage: make <target> [VARIABLE=value]"
 > @echo
 > @echo "Images: build-s5cmd, build-batch, build-marple, build-airflow, push-batch, push-marple, push-airflow, push-all"
-> @echo "Releases: retag, promote"
+> @echo "Releases: retag, promote, patch-build"
 > @echo "Deployment: sync-vars, secrets, status, diff, launch, bootstrap, delete"
 > @echo "Dev instance: dev-up, dev-down, dev-refresh, dev-keepalive, dev-autostop, dev-status"
 > @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, test-s5cmd, clean"
 > @echo
-> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, SKIP_EXISTING, STACK, YES"
+> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, SKIP_EXISTING, RELEASE, STACK, YES"
 
 check-ecr-registry:
 > @test -n "$$ECR_REGISTRY" || { echo >&2 "ECR_REGISTRY is required but not set. Aborting."; exit 1; }
@@ -110,6 +110,18 @@ push-all: push-batch push-marple push-airflow
 # Run by the release pipeline; adds VERSION_TAG to an existing sha build.
 retag:
 > $(UV_DEPLOY) comet-deploy retag "$$ENV" "$$SOURCE_TAG" "$$VERSION_TAG"
+
+# Rebuild a release with fresh base images and system packages, e.g. `make patch-build RELEASE=0.3.0` (or
+# RELEASE=v0.3.0); with RELEASE=latest or no RELEASE the pipeline rebuilds the latest release. Other values fail
+# here rather than minutes later in CodeBuild. The name must match ${AWS::StackName}-patch in
+# infra/templates/build-pipeline.j2.
+patch-build:
+> release="$$RELEASE"; \
+  [[ -z $$release || $$release == latest || $$release =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$$ ]] \
+    || { echo >&2 "RELEASE must be X.Y.Z, vX.Y.Z or latest"; exit 1; }; \
+  [[ -z $$release || $$release == latest ]] || release="v$${release#v}"; \
+  aws codepipeline start-pipeline-execution --name "comet-$$ENV-build-pipeline-patch" \
+    $${release:+--variables "name=RELEASE_TAG,value=$$release"} --no-cli-pager
 
 # Select the image tag deploys use, e.g. `make promote SOURCE_TAG=0.1.0`.
 promote: check-source-tag

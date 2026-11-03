@@ -170,8 +170,11 @@ flowchart LR
     subgraph build["Build and release"]
         main["push to main"] --> bp["build pipeline<br/>buildspec.yaml, build mode"]
         vtag["push tag v0.1.0"] --> rp["release pipeline<br/>buildspec.yaml, release mode"]
+        patch["make patch-build RELEASE=0.3.0"] --> pp["patch pipeline<br/>buildspec.yaml, patch mode"]
         bp -->|"push images tagged sha-98dea10"| ecr["ECR"]
         rp -->|"add tag 0.1.0 to existing images"| ecr
+        pp -->|"rebuild v0.3.0, push images tagged 0.3.0-20261102T0300Z"| ecr
+        pp -->|"Trivy summary vs promoted images"| alerts["alert topic"]
     end
 
     subgraph promote["Promote"]
@@ -196,10 +199,51 @@ Pushing a tag such as `v0.1.0` runs the release pipeline, which adds the tag `0.
 without rebuilding them. A release fails if its commit hasn't been built.
 
 Release tags are retained. ECR retains the latest 50 `sha-*` builds, the latest 10 `local-*` builds,
-and the latest three untagged images.
+the latest 10 [patch builds](#patch-builds), and the latest three untagged images.
 
 The pipeline uses the GitHub connection and `codebuild_image` configured during the
 [first deployment](#first-deployment).
+
+### Patch builds
+
+A patch build rebuilds a release with the latest base images and system packages. Use it to pick up
+OS security fixes without cutting a new release:
+
+```bash
+make patch-build RELEASE=0.3.0   # leave out RELEASE to rebuild the latest release
+```
+
+You can also start one in the CodePipeline console: open `comet-dev-build-pipeline-patch`, choose
+**Release change**, and set `RELEASE_TAG` to a release such as `v0.3.0`, or `latest`.
+
+The pipeline rebuilds the release's three images and tags them with the release and the UTC build
+time, for example `0.3.0-20261102T0300Z`. Patch builds work for `v0.3.0` and later.
+
+Trivy then scans the new images and the promoted ones, and the alert topic gets a summary of the
+critical and high findings:
+
+```text
+0.3.0-20261102T0300Z vs promoted 0.3.0
+  batch    CRIT 2→0  HIGH 9→1
+  marple   CRIT 0→0  HIGH 3→0
+  airflow  CRIT 17→0  HIGH 40→3
+
+Full reports: https://s3.console.aws.amazon.com/s3/buckets/...
+```
+
+The full reports, as JSON and as readable tables, are kept in the artifact bucket under
+`patch-scans/<tag>/` for 30 days. `n/a` means an image couldn't be scanned. Scan problems never fail
+the build.
+
+If the results look right, promote the new tag and deploy (see
+[Deploying dev stacks](#deploying-dev-stacks)):
+
+```bash
+make promote SOURCE_TAG=0.3.0-20261102T0300Z
+```
+
+A patch build keeps the versions pinned in the release, so it doesn't pick up new Airflow, Python
+package, s5cmd or Go versions. Those need a new release.
 
 ### Versions
 

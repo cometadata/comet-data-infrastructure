@@ -11,6 +11,12 @@ from comet_deploy.images import promote, repository_names, retag
 REPOSITORIES = repository_names("dev")
 
 
+def test_images_lists_the_image_names_one_per_line(capsys):
+    """scripts/patch-scan.sh loops over this output, so each name must be on its own line."""
+    app(["images"], result_action="return_value")
+    assert capsys.readouterr().out == "batch\nmarple\nairflow\n"
+
+
 @pytest.fixture
 def ecr():
     client = boto3.client("ecr")

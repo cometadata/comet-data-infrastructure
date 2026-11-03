@@ -10,6 +10,11 @@ TAG_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
+def images() -> None:
+    """Print the image names, one per line, for scripts that loop over them."""
+    print("\n".join(IMAGE_NAMES))
+
+
 def repository_names(env: str) -> list[str]:
     """Return the ECR repository names for the environment's images."""
     return [f"comet-{env}-{name}" for name in IMAGE_NAMES]

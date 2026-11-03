@@ -1,5 +1,11 @@
-# Main builds push sha-tagged images. Release tags label an existing sha build.
+# Main builds push sha-tagged images. Release tags label an existing sha build. Patch builds rebuild a release
+# from fresh base images and system packages in a worktree, tag it X.Y.Z-<UTC timestamp>, then run
+# scripts/patch-scan.sh from this checkout.
 version: 0.2
+
+env:
+  # Lets patch builds fetch tags in the CODEBUILD_CLONE_REF clone.
+  git-credential-helper: yes
 
 phases:
   pre_build:
@@ -12,6 +18,20 @@ phases:
             [[ "$TRIGGER_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release tag: $TRIGGER_TAG" >&2; exit 1; }
             export VERSION_TAG="${TRIGGER_TAG#v}"
             ;;
+          patch)
+            git fetch --tags || { echo "Could not fetch tags" >&2; exit 1; }
+            if [[ -z "$RELEASE_TAG" || "$RELEASE_TAG" == latest ]]; then
+              RELEASE_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            fi
+            { [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && git rev-parse -q --verify "refs/tags/$RELEASE_TAG" >/dev/null; } \
+              || { echo "Invalid or unknown RELEASE_TAG: $RELEASE_TAG" >&2; exit 1; }
+            # v0.3.0 is the first release whose images upgrade their system packages.
+            [[ $(printf '%s\n' v0.3.0 "$RELEASE_TAG" | sort -V | head -1) == v0.3.0 ]] \
+              || { echo "Release $RELEASE_TAG predates patch builds" >&2; exit 1; }
+            # The release is built in its own worktree; the scans run from this checkout.
+            git worktree add -q release "$RELEASE_TAG" || { echo "Could not check out $RELEASE_TAG" >&2; exit 1; }
+            export RELEASE_TAG IMAGE_TAG="${RELEASE_TAG#v}-$(date -u +%Y%m%dT%H%MZ)"
+            ;&  # Falls through to the build setup.
           build)
             mkdir -p ~/.docker && echo "{\"credHelpers\":{\"$ECR_REGISTRY\":\"ecr-login\"}}" > ~/.docker/config.json
             docker buildx create --driver docker-container --use
@@ -21,13 +41,22 @@ phases:
             exit 1
             ;;
         esac
-      # Both modes run make targets that use uv.
+      # Every mode runs make targets that use uv.
       - . ./versions.env && curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | env UV_INSTALL_DIR=/usr/local/bin sh
   build:
     commands:
       - |
         if [[ "$PIPELINE_MODE" == release ]]; then
           make retag SOURCE_TAG="$IMAGE_TAG" VERSION_TAG="$VERSION_TAG"
+        elif [[ "$PIPELINE_MODE" == patch ]]; then
+          make -C release push-all IMAGE_TAG="$IMAGE_TAG"
         else
           make push-all IMAGE_TAG="$IMAGE_TAG" SKIP_EXISTING=1
+        fi
+  post_build:
+    commands:
+      # The scan summary is a report only, so a failure doesn't fail the build.
+      - |
+        if [[ "$PIPELINE_MODE" == patch && "$CODEBUILD_BUILD_SUCCEEDING" == 1 ]]; then
+          scripts/patch-scan.sh || echo "WARNING: The patch scan failed; the images were pushed" >&2
         fi

@@ -48,5 +48,5 @@ class TestCLI:
         executable = Path(sys.executable).with_name("comet-deploy")
         result = subprocess.run([str(executable), "--help"], cwd=tmp_path, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
-        for name in ("promote", "retag", "sync-vars", "secrets"):
+        for name in ("promote", "retag", "scan-summary", "sync-vars", "secrets"):
             assert name in result.stdout

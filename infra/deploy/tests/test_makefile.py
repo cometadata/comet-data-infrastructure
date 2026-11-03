@@ -22,12 +22,19 @@ MAKE_VARIABLES = (
     "SKIP_EXISTING",
     "STACK",
     "YES",
+    "RELEASE",
 )
+
+# The external commands the fixture replaces with stubs that log their argv.
+STUBBED_COMMANDS = ("uv", "aws")
 
 
 @pytest.fixture
 def make(tmp_path):
-    """Run a make target against a copy of the Makefile, with uv replaced by a stub that logs its argv."""
+    """Run a make target against a copy of the Makefile, with uv and aws replaced by stubs that log their argv.
+
+    Each call returns the result and the uv argv; `run.argv(command)` returns another stub's last argv.
+    """
     for name in ("Makefile", "versions.env", ".python-version"):
         shutil.copyfile(PROJECT_DIR / name, tmp_path / name)
     # The Sceptre targets check that the environment exists.
@@ -35,15 +42,22 @@ def make(tmp_path):
     (tmp_path / "vars-preview.yaml").write_text("")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    stub = bin_dir / "uv"
-    stub.write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, sys\n"
-        "from pathlib import Path\n"
-        "Path(os.environ['INVOCATION_LOG']).write_text(json.dumps(sys.argv[1:]))\n"
-    )
-    stub.chmod(0o755)
-    log = tmp_path / "invocation.json"
+    log_dir = tmp_path / "invocations"
+    log_dir.mkdir()
+    for command in STUBBED_COMMANDS:
+        stub = bin_dir / command
+        stub.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "log = Path(os.environ['INVOCATION_LOG_DIR']) / (Path(sys.argv[0]).name + '.json')\n"
+            "log.write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        stub.chmod(0o755)
+
+    def argv(command):
+        log = log_dir / f"{command}.json"
+        return json.loads(log.read_text()) if log.exists() else None
 
     def run(*args):
         # Drop the flags an outer `make test` exports and any Makefile variables set in the shell.
@@ -52,13 +66,13 @@ def make(tmp_path):
         result = subprocess.run(
             ["make", *args],
             cwd=tmp_path,
-            env=env | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "INVOCATION_LOG": str(log)},
+            env=env | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "INVOCATION_LOG_DIR": str(log_dir)},
             capture_output=True,
             text=True,
         )
-        uv_argv = json.loads(log.read_text()) if log.exists() else None
-        return result, uv_argv
+        return result, argv("uv")
 
+    run.argv = argv
     return run
 
 
@@ -107,3 +121,28 @@ class TestMakefile:
         assert result.returncode != 0
         assert "SOURCE_TAG is required" in result.stderr
         assert uv_argv is None
+
+
+class TestPatchBuild:
+    @pytest.mark.parametrize(("release", "value"), [("0.2.3", "v0.2.3"), ("v0.2.3", "v0.2.3"), ("latest", "latest")])
+    def test_patch_build_starts_the_patch_pipeline_with_the_release_tag(self, make, release, value):
+        result, _ = make("patch-build", "ENV=preview", f"RELEASE={release}")
+
+        assert result.returncode == 0, result.stderr
+        assert make.argv("aws") == [
+            "codepipeline",
+            "start-pipeline-execution",
+            "--name",
+            "comet-preview-build-pipeline-patch",
+            "--variables",
+            f"name=RELEASE_TAG,value={value}",
+            "--no-cli-pager",
+        ]
+
+    @pytest.mark.parametrize("release", ["V0.2.3", "0.2", "v0.2.3-rc1", "0.2.3 ", "vv0.2.3"])
+    def test_invalid_release_fails_before_starting_the_pipeline(self, make, release):
+        result, _ = make("patch-build", "ENV=preview", f"RELEASE={release}")
+
+        assert result.returncode != 0
+        assert "RELEASE must be X.Y.Z, vX.Y.Z or latest" in result.stderr
+        assert make.argv("aws") is None
