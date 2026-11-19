@@ -338,9 +338,13 @@ Amazon and Slack providers installed from `uv.lock`. `versions.env` sets the Air
 `.python-version` sets Python.
 
 ```bash
-make build-airflow         # build the image locally
-make push-airflow          # push to ECR tagged with IMAGE_TAG
+make build-airflow             # build the image locally
+make build-airflow NO_CACHE=1  # rebuild every layer, to pick up OS fixes
+make push-airflow              # push to ECR tagged with IMAGE_TAG
 ```
+
+A plain local build can reuse the OS upgrade layer from an earlier build. `NO_CACHE=1` reruns it,
+and works for `build-batch` and `build-marple` too.
 
 To bump the Airflow version, edit `AIRFLOW_VERSION` in `versions.env`, then:
 

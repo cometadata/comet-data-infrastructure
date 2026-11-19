@@ -23,10 +23,11 @@ MAKE_VARIABLES = (
     "STACK",
     "YES",
     "RELEASE",
+    "NO_CACHE",
 )
 
 # The external commands the fixture replaces with stubs that log their argv.
-STUBBED_COMMANDS = ("uv", "aws")
+STUBBED_COMMANDS = ("uv", "aws", "docker")
 
 
 @pytest.fixture
@@ -121,6 +122,19 @@ class TestMakefile:
         assert result.returncode != 0
         assert "SOURCE_TAG is required" in result.stderr
         assert uv_argv is None
+
+
+class TestImageBuilds:
+    @pytest.mark.parametrize("target", ["build-marple", "build-batch", "build-airflow"])
+    def test_no_cache_is_passed_to_docker_only_when_set(self, make, target):
+        # -o skips the lock check, which needs the real uv.
+        result, _ = make("-o", "check-airflow-version", target, "NO_CACHE=1")
+        assert result.returncode == 0, result.stderr
+        assert "--no-cache" in make.argv("docker")
+
+        result, _ = make("-o", "check-airflow-version", target)
+        assert result.returncode == 0, result.stderr
+        assert "--no-cache" not in make.argv("docker")
 
 
 class TestPatchBuild:

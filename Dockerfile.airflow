@@ -8,29 +8,42 @@ FROM apache/airflow:slim-${AIRFLOW_VERSION}-python${PYTHON_VERSION}
 ARG AIRFLOW_VERSION
 
 # Use the uv bundled with the Airflow base image.
-# Cache and site-packages are on separate filesystems; copy instead of hardlinking.
+# uv's temporary cache and site-packages can be on separate filesystems; copy instead of hardlinking.
 ENV UV_LINK_MODE=copy
 
 USER root
-RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
+# The hardened base also records its packages in /var/lib/dpkg/status.d, which apt never updates, so
+# scanners report an upgraded package at its old version as well. Every record there is also in
+# /var/lib/dpkg/status; check that, then remove the stale copy.
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && if [ -d /var/lib/dpkg/status.d ]; then \
+         for record in /var/lib/dpkg/status.d/*; do \
+           [ -e "$record" ] || continue; \
+           pkg=$(sed -n 's/^Package: //p' "$record"); \
+           [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg")" = installed ] \
+             || { echo "$pkg is recorded in status.d but is not installed" >&2; exit 1; }; \
+         done; \
+         rm -rf /var/lib/dpkg/status.d; \
+       fi
 # comet uses /data as its working dir.
 RUN mkdir -p /data && chown airflow:0 /data
 # comet shells out to s5cmd to copy files to and from S3; built by `make build-s5cmd`.
 COPY --chmod=755 build/s5cmd/s5cmd /usr/local/bin/s5cmd
 USER airflow
 
-# Overlay dependencies from uv.lock onto the base image environment.
+# Overlay dependencies from uv.lock onto the base image environment. The base sets UV_CACHE_DIR to a
+# directory in the image, so a cache would be saved into the layer; --no-cache uses a temporary one.
 COPY --chown=airflow:0 pyproject.toml uv.lock /opt/comet/
-RUN --mount=type=cache,target=/home/airflow/.cache/uv,uid=50000,gid=0 \
-    uv sync --locked --active --inexact --no-install-project --no-dev \
+RUN uv sync --no-cache --locked --active --inexact --no-install-project --no-dev \
       --extra airflow --project /opt/comet
 
 COPY --chown=airflow:0 src /opt/comet/src
-RUN --mount=type=cache,target=/home/airflow/.cache/uv,uid=50000,gid=0 \
-    uv sync --locked --active --inexact --no-dev --extra airflow --project /opt/comet
+RUN uv sync --no-cache --locked --active --inexact --no-dev --extra airflow --project /opt/comet
 
-# Check dependency consistency and confirm the overlay did not change Airflow's version.
-RUN uv pip check \
+# Nothing here uses the pip that Airflow installs, and scanners report the libraries bundled inside it.
+# Then check dependency consistency and confirm the overlay did not change Airflow's version.
+RUN uv pip uninstall pip \
+    && uv pip check \
     && python -c "import airflow; import airflow.providers.amazon; import airflow.providers.slack; assert airflow.__version__ == '${AIRFLOW_VERSION}', airflow.__version__"
 
 # Entrypoint derives env and dispatches by role.
