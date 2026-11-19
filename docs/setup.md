@@ -235,6 +235,17 @@ The full reports, as JSON and as readable tables, are kept in the artifact bucke
 `patch-scans/<tag>/` for 30 days. `n/a` means an image couldn't be scanned. Scan problems never fail
 the build.
 
+A `WARNING` line under the counts means an image records a package at more than one version, so its
+counts include findings for a version that is no longer installed:
+
+```text
+  WARNING airflow 0.3.1-20261104T0410Z: 3 packages listed at more than one version (libsqlite3-0, linux-libc-dev, tzdata); the counts include versions that are no longer installed
+```
+
+The Airflow image's hardened base keeps a second package list that upgrades don't update. Releases
+after `v0.3.1` remove it when the image is built, so the warning shows only for `v0.3.1` and
+earlier.
+
 If the results look right, promote the new tag and deploy (see
 [Deploying dev stacks](#deploying-dev-stacks)):
 
