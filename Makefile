@@ -83,10 +83,12 @@ push-marple: check-ecr-registry check-image-tag build-marple
 
 # Airflow image with COMET installed from uv.lock.
 
-# Update uv.lock using Airflow's official constraints.
+# Update uv.lock using Airflow's official constraints, except where a minimum under constraint-dependencies
+# in pyproject.toml is higher.
 bump-airflow:
 > curl -sfL "https://raw.githubusercontent.com/apache/airflow/constraints-$(AIRFLOW_VERSION)/constraints-$(PYTHON_VERSION).txt" \
 >     -o /tmp/airflow-constraints.txt
+> uv run --no-project scripts/airflow_constraints.py /tmp/airflow-constraints.txt pyproject.toml
 > uv add --optional airflow --no-sync -c /tmp/airflow-constraints.txt \
 >     "apache-airflow[amazon,postgres,standard,fab]==$(AIRFLOW_VERSION)" \
 >     "apache-airflow-providers-amazon[aiobotocore]" \
