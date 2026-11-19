@@ -344,6 +344,11 @@ image set; promote its SHA or a subsequent release tag before launching the Airf
 `make bump-airflow` rebuilds `uv.lock` using Airflow's official constraints. To change providers or
 extras, edit the target before running it.
 
+Airflow's constraints sometimes pin a package to a version with a known vulnerability.
+`constraint-dependencies` in `pyproject.toml` holds a minimum for each such package, and
+`make bump-airflow` prints any Airflow constraint it sets aside because it is below one. Remove a
+minimum once Airflow's constraints satisfy it.
+
 ### Configure Slack alerts
 
 Create a Slack channel for the alerts:

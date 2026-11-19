@@ -43,7 +43,7 @@ notebooks = [
 airflow = [
     "apache-airflow-providers-amazon[aiobotocore]>=9.34.0",
     "apache-airflow-providers-slack>=9.10.2,<10",
-    "apache-airflow[amazon,fab,postgres,standard]==3.4.0rc2",
+    "apache-airflow[amazon,fab,postgres,standard]==3.4.0",
 ]
 
 [project.scripts]
@@ -51,6 +51,13 @@ comet = "comet.cli:main"
 
 [tool.uv]
 default-groups = []
+# Security minimums that Airflow's constraints have not reached yet. make bump-airflow sets aside an
+# Airflow constraint below one of these. Remove an entry once Airflow's constraints satisfy it.
+constraint-dependencies = [
+    "dnspython>=2.9.2", # GHSA-vvf4-9x63-8xvv
+    "soupsieve>=4.0.0", # GHSA-mmhr-3c5m-f64f
+    "tornado>=6.6.1", # GHSA-5cjw-f85j-cv6r
+]
 
 [tool.pytest.ini_options]
 # make test also runs the infrastructure tests in the infra environment.
