@@ -50,6 +50,15 @@ RUN uv sync --no-cache --locked --active --inexact --no-install-project --no-dev
 COPY --chown=airflow:0 src /opt/comet/src
 RUN uv sync --no-cache --locked --active --inexact --no-dev --extra airflow --project /opt/comet
 
+# The hardened Python gives threads a 1 MiB stack, so deeply nested input (a JSON body, say) crashes the
+# process instead of raising RecursionError. The base restores 8 MiB with a .pth file in the system
+# Python's site-packages, but Airflow runs from the /home/airflow/.local venv, which ignores that
+# directory. Put the same file, under the same name, in the venv, and fail the build if it doesn't take.
+# Remove this once the base image does it.
+RUN echo "import threading; threading.stack_size(8 * 1024 * 1024)" \
+      > "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/airflow-thread-stack-size.pth" \
+    && python -c "import threading; assert threading.stack_size() == 8 * 1024 * 1024, threading.stack_size()"
+
 # Nothing here uses the pip that Airflow installs, and scanners report the libraries bundled inside it.
 # Then check dependency consistency and confirm the overlay did not change Airflow's version.
 RUN uv pip uninstall pip \
