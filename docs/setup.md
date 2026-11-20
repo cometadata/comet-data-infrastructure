@@ -346,6 +346,11 @@ make push-airflow              # push to ECR tagged with IMAGE_TAG
 A plain local build can reuse the OS upgrade layer from an earlier build. `NO_CACHE=1` reruns it,
 and works for `build-batch` and `build-marple` too.
 
+The base image holds its Python packages back from upgrades. The OS upgrade lifts that hold, so
+Python moves to the newest hardened build of the same version (3.12.16-4 to 3.12.16-7, for example),
+and then puts it back. Patch builds pick this up too. A new Python version still means changing
+`.python-version`.
+
 To bump the Airflow version, edit `AIRFLOW_VERSION` in `versions.env`, then:
 
 ```bash

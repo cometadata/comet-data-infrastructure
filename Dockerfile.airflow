@@ -12,10 +12,20 @@ ARG AIRFLOW_VERSION
 ENV UV_LINK_MODE=copy
 
 USER root
+# The base holds its Python packages so apt can't swap them for Debian's python3, which also stops
+# upgrades. Lift the hold for the upgrade so Python gets the newest hardened build of the same minor
+# version, then restore it for anything built on this image. The new build ships no bytecode cache,
+# and the airflow user can't write one, so regenerate it as the base build does; compileall exits
+# non-zero on the standard library's deliberately broken test files.
 # The hardened base also records its packages in /var/lib/dpkg/status.d, which apt never updates, so
 # scanners report an upgraded package at its old version as well. Every record there is also in
 # /var/lib/dpkg/status; check that, then remove the stale copy.
-RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/* \
+RUN held=$(apt-mark showhold | grep -E '^(lib)?python-3\.' || true) \
+    && if [ -n "$held" ]; then apt-mark unhold $held; fi \
+    && apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && if [ -n "$held" ]; then apt-mark hold $held; fi \
+    && stdlib=$(/usr/python/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])') \
+    && { /usr/python/bin/python -m compileall -q -j "$(nproc)" -o 0 -o 1 -o 2 "$stdlib" || true; } \
     && if [ -d /var/lib/dpkg/status.d ]; then \
          for record in /var/lib/dpkg/status.d/*; do \
            [ -e "$record" ] || continue; \
