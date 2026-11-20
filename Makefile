@@ -12,7 +12,8 @@ ENV ?= dev
 # tag such as IMAGE_TAG=local-1 because ECR tags cannot be overwritten.
 IMAGE_TAG ?= sha-$(shell git rev-parse --short=7 HEAD)
 # User-supplied values are read by the shell, never expanded into recipe text by Make.
-export ENV IMAGE_TAG ECR_REGISTRY SOURCE_TAG VERSION_TAG SKIP_EXISTING STACK YES RELEASE
+# NO_CACHE=1 rebuilds every image layer, so a local build reruns the OS package upgrade.
+export ENV IMAGE_TAG ECR_REGISTRY SOURCE_TAG VERSION_TAG SKIP_EXISTING STACK YES RELEASE NO_CACHE
 
 UV_RUN = uv run --locked --no-active
 UV_INFRA = uv run --project infra --locked --no-active
@@ -32,7 +33,7 @@ help:
 > @echo "Dev instance: dev-up, dev-down, dev-refresh, dev-keepalive, dev-autostop, dev-status"
 > @echo "Development: install, install-infra, bump-airflow, fmt, fmt-ci, lint, lint-ci, test, test-s5cmd, clean"
 > @echo
-> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, SKIP_EXISTING, RELEASE, STACK, YES"
+> @echo "Variables: ENV, IMAGE_TAG, ECR_REGISTRY, SOURCE_TAG, VERSION_TAG, SKIP_EXISTING, RELEASE, STACK, YES, NO_CACHE"
 
 check-ecr-registry:
 > @test -n "$$ECR_REGISTRY" || { echo >&2 "ECR_REGISTRY is required but not set. Aborting."; exit 1; }
@@ -55,7 +56,7 @@ test-s5cmd:
 
 # COMET runtime image (comet-<env>-batch): AWS Batch and the dev arXiv pipeline.
 build-batch: build-s5cmd
-> docker buildx build --platform linux/amd64 --provenance=false --pull --load -f Dockerfile.batch \
+> docker buildx build --platform linux/amd64 --provenance=false --pull --load $${NO_CACHE:+--no-cache} -f Dockerfile.batch \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     --build-arg "UV_VERSION=$(UV_VERSION)" \
     --build-arg "DUCKDB_VERSION=$(DUCKDB_VERSION)" \
@@ -71,7 +72,7 @@ push-batch: check-ecr-registry check-image-tag build-batch
 
 # Marple image pinned by MARPLE_SHA in versions.env.
 build-marple:
-> docker buildx build --platform linux/amd64 --provenance=false --pull --load -f Dockerfile.marple \
+> docker buildx build --platform linux/amd64 --provenance=false --pull --load $${NO_CACHE:+--no-cache} -f Dockerfile.marple \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     --build-arg "UV_VERSION=$(UV_VERSION)" \
     --build-arg "MARPLE_REPO=$(MARPLE_REPO)" \
@@ -83,10 +84,12 @@ push-marple: check-ecr-registry check-image-tag build-marple
 
 # Airflow image with COMET installed from uv.lock.
 
-# Update uv.lock using Airflow's official constraints.
+# Update uv.lock using Airflow's official constraints, except where a minimum under constraint-dependencies
+# in pyproject.toml is higher.
 bump-airflow:
 > curl -sfL "https://raw.githubusercontent.com/apache/airflow/constraints-$(AIRFLOW_VERSION)/constraints-$(PYTHON_VERSION).txt" \
 >     -o /tmp/airflow-constraints.txt
+> uv run --no-project scripts/airflow_constraints.py /tmp/airflow-constraints.txt pyproject.toml
 > uv add --optional airflow --no-sync -c /tmp/airflow-constraints.txt \
 >     "apache-airflow[amazon,postgres,standard,fab]==$(AIRFLOW_VERSION)" \
 >     "apache-airflow-providers-amazon[aiobotocore]" \
@@ -97,7 +100,7 @@ check-airflow-version:
 >   [ "$$locked" = "$(AIRFLOW_VERSION)" ] || { echo >&2 "versions.env has AIRFLOW_VERSION=$(AIRFLOW_VERSION) but uv.lock has $$locked. Run make bump-airflow."; exit 1; }
 
 build-airflow: check-airflow-version build-s5cmd
-> docker buildx build --platform linux/amd64 --provenance=false --pull --load -f Dockerfile.airflow \
+> docker buildx build --platform linux/amd64 --provenance=false --pull --load $${NO_CACHE:+--no-cache} -f Dockerfile.airflow \
     --build-arg "AIRFLOW_VERSION=$(AIRFLOW_VERSION)" \
     --build-arg "PYTHON_VERSION=$(PYTHON_VERSION)" \
     -t "comet-airflow:$(AIRFLOW_VERSION)" -t comet-airflow:latest .

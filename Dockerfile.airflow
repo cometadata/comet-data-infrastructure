@@ -8,29 +8,61 @@ FROM apache/airflow:slim-${AIRFLOW_VERSION}-python${PYTHON_VERSION}
 ARG AIRFLOW_VERSION
 
 # Use the uv bundled with the Airflow base image.
-# Cache and site-packages are on separate filesystems; copy instead of hardlinking.
+# uv's temporary cache and site-packages can be on separate filesystems; copy instead of hardlinking.
 ENV UV_LINK_MODE=copy
 
 USER root
-RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
+# The base holds its Python packages so apt can't swap them for Debian's python3, which also stops
+# upgrades. Lift the hold for the upgrade so Python gets the newest hardened build of the same minor
+# version, then restore it for anything built on this image. The new build ships no bytecode cache,
+# and the airflow user can't write one, so regenerate it as the base build does; compileall exits
+# non-zero on the standard library's deliberately broken test files.
+# The hardened base also records its packages in /var/lib/dpkg/status.d, which apt never updates, so
+# scanners report an upgraded package at its old version as well. Every record there is also in
+# /var/lib/dpkg/status; check that, then remove the stale copy.
+RUN held=$(apt-mark showhold | grep -E '^(lib)?python-3\.' || true) \
+    && if [ -n "$held" ]; then apt-mark unhold $held; fi \
+    && apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && if [ -n "$held" ]; then apt-mark hold $held; fi \
+    && stdlib=$(/usr/python/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])') \
+    && { /usr/python/bin/python -m compileall -q -j "$(nproc)" -o 0 -o 1 -o 2 "$stdlib" || true; } \
+    && if [ -d /var/lib/dpkg/status.d ]; then \
+         for record in /var/lib/dpkg/status.d/*; do \
+           [ -e "$record" ] || continue; \
+           pkg=$(sed -n 's/^Package: //p' "$record"); \
+           [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg")" = installed ] \
+             || { echo "$pkg is recorded in status.d but is not installed" >&2; exit 1; }; \
+         done; \
+         rm -rf /var/lib/dpkg/status.d; \
+       fi
 # comet uses /data as its working dir.
 RUN mkdir -p /data && chown airflow:0 /data
 # comet shells out to s5cmd to copy files to and from S3; built by `make build-s5cmd`.
 COPY --chmod=755 build/s5cmd/s5cmd /usr/local/bin/s5cmd
 USER airflow
 
-# Overlay dependencies from uv.lock onto the base image environment.
+# Overlay dependencies from uv.lock onto the base image environment. The base sets UV_CACHE_DIR to a
+# directory in the image, so a cache would be saved into the layer; --no-cache uses a temporary one.
 COPY --chown=airflow:0 pyproject.toml uv.lock /opt/comet/
-RUN --mount=type=cache,target=/home/airflow/.cache/uv,uid=50000,gid=0 \
-    uv sync --locked --active --inexact --no-install-project --no-dev \
+RUN uv sync --no-cache --locked --active --inexact --no-install-project --no-dev \
       --extra airflow --project /opt/comet
 
 COPY --chown=airflow:0 src /opt/comet/src
-RUN --mount=type=cache,target=/home/airflow/.cache/uv,uid=50000,gid=0 \
-    uv sync --locked --active --inexact --no-dev --extra airflow --project /opt/comet
+RUN uv sync --no-cache --locked --active --inexact --no-dev --extra airflow --project /opt/comet
 
-# Check dependency consistency and confirm the overlay did not change Airflow's version.
-RUN uv pip check \
+# The hardened Python gives threads a 1 MiB stack, so deeply nested input (a JSON body, say) crashes the
+# process instead of raising RecursionError. The base restores 8 MiB with a .pth file in the system
+# Python's site-packages, but Airflow runs from the /home/airflow/.local venv, which ignores that
+# directory. Put the same file, under the same name, in the venv, and fail the build if it doesn't take.
+# Remove this once the base image does it.
+RUN echo "import threading; threading.stack_size(8 * 1024 * 1024)" \
+      > "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/airflow-thread-stack-size.pth" \
+    && python -c "import threading; assert threading.stack_size() == 8 * 1024 * 1024, threading.stack_size()"
+
+# Nothing here uses the pip that Airflow installs, and scanners report the libraries bundled inside it.
+# Then check dependency consistency and confirm the overlay did not change Airflow's version.
+RUN uv pip uninstall pip \
+    && uv pip check \
     && python -c "import airflow; import airflow.providers.amazon; import airflow.providers.slack; assert airflow.__version__ == '${AIRFLOW_VERSION}', airflow.__version__"
 
 # Entrypoint derives env and dispatches by role.
